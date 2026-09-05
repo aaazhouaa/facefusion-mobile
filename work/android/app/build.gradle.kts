@@ -53,6 +53,41 @@ val appLabel = if (hasContentGate) "FaceFusion" else "FaceFusion Dev"
 val ncnnDir = file("../ncnn")
 val hasNcnn = File(ncnnDir, "lib/libncnn.a").exists()
 
+// QNN headers and Android/Hexagon runtimes are generated locally from the Qualcomm SDK
+// and intentionally ignored by Git.  Make a fresh clone self-healing: every Android
+// build checks the required marker and representative files, and stages them when they
+// are absent.  The SDK location is supplied through QNN_SDK_ROOT/QAIRT_SDK_ROOT (or the
+// default understood by stage_qnn.sh).
+val qnnStageScript = rootProject.file("stage_qnn.sh")
+val qnnStage by tasks.registering {
+    doLast {
+        val required = listOf(
+            file("src/main/cpp/include/QNN/QnnBackend.h"),
+            file("src/main/jniLibs/QNN_STAGED.txt"),
+            file("src/main/jniLibs/arm64-v8a/libQnnHtp.so"),
+            file("src/main/jniLibs/arm64-v8a/libQnnHtpV79Stub.so"),
+            file("src/main/jniLibs/arm64-v8a/libQnnHtpV79Skel.so"),
+            file("src/main/jniLibs/arm64-v8a/libQnnHtpV79.so"),
+        )
+        if (required.all { it.isFile }) {
+            logger.lifecycle("QNN staging already present; skipping ${qnnStageScript.name}")
+        } else {
+            if (!qnnStageScript.isFile) {
+                throw GradleException("Missing QNN staging script: ${qnnStageScript.absolutePath}")
+            }
+            logger.lifecycle("QNN staging is incomplete; running ${qnnStageScript.name}")
+            exec {
+                workingDir(rootProject.projectDir)
+                commandLine("bash", qnnStageScript.absolutePath)
+            }
+        }
+    }
+}
+
+tasks.named("preBuild") {
+    dependsOn(qnnStage)
+}
+
 android {
     namespace = "com.facefusion.mobile"
     // The sandbox SDK currently provides platform 34, which is sufficient for compilation.
