@@ -26,32 +26,37 @@ TIERS=${QNN_HTP_TIERS:-"68 69 73 75 79 81"}
     exit 1
 }
 
+# Preflight every source before touching the staging tree. This prevents a failed build
+# from leaving a half-refreshed set of ignored libraries behind.
+android_libs=(libQnnHtp.so libQnnSystem.so)
+for tier in $TIERS; do
+    android_libs+=("libQnnHtpV${tier}Stub.so")
+done
+for lib in "${android_libs[@]}"; do
+    src="$SDK/lib/aarch64-android/$lib"
+    [ -f "$src" ] || { echo "Missing required Android runtime: $src" >&2; exit 1; }
+done
+for tier in $TIERS; do
+    hex="$SDK/lib/hexagon-v${tier}/unsigned"
+    for lib in "libQnnHtpV${tier}Skel.so"; do
+        [ -f "$hex/$lib" ] || { echo "Missing required Hexagon skel: $hex/$lib" >&2; exit 1; }
+    done
+done
+
 mkdir -p "$INCLUDE_DEST" "$JNI_DEST"
 rm -rf "$INCLUDE_DEST/QNN"
 cp -a "$SDK/include/QNN" "$INCLUDE_DEST/QNN"
 
-android_libs=(
-    libQnnHtp.so
-    libQnnHtpPrepare.so
-    libQnnHtpNetRunExtensions.so
-    libQnnSystem.so
-)
-for tier in $TIERS; do
-    android_libs+=("libQnnHtpV${tier}Stub.so")
-done
-
+# Match the upstream APK layout: backend/system, one Android stub and one Hexagon
+# skel per supported tier. The HTP variant implementation and optional helper libraries
+# are not packaged; the in-process backend loads the skel through ADSP_LIBRARY_PATH.
+rm -f "$JNI_DEST"/libQnnHtpV*.so
+rm -f "$JNI_DEST"/libQnnHtpPrepare.so "$JNI_DEST"/libQnnHtpNetRunExtensions.so
 for lib in "${android_libs[@]}"; do
-    src="$SDK/lib/aarch64-android/$lib"
-    [ -f "$src" ] || { echo "Missing required runtime: $src" >&2; exit 1; }
-    cp -a "$src" "$JNI_DEST/$lib"
+    cp -a "$SDK/lib/aarch64-android/$lib" "$JNI_DEST/$lib"
 done
-
 for tier in $TIERS; do
-    hex="$SDK/lib/hexagon-v${tier}/unsigned"
-    for lib in "libQnnHtpV${tier}Skel.so" "libQnnHtpV${tier}.so"; do
-        [ -f "$hex/$lib" ] || { echo "Missing required Hexagon runtime: $hex/$lib" >&2; exit 1; }
-        cp -a "$hex/$lib" "$JNI_DEST/$lib"
-    done
+    cp -a "$SDK/lib/hexagon-v${tier}/unsigned/libQnnHtpV${tier}Skel.so" "$JNI_DEST/libQnnHtpV${tier}Skel.so"
 done
 
 version=${QAIRT_VERSION:-$(basename "$(readlink -f "$SDK")")}
