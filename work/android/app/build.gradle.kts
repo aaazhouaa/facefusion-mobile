@@ -55,7 +55,9 @@ val hasNcnn = File(ncnnDir, "lib/libncnn.a").exists()
 
 android {
     namespace = "com.facefusion.mobile"
-    compileSdk = 35
+    // The sandbox SDK currently provides platform 34, which is sufficient for compilation.
+    compileSdk = 34
+    buildToolsVersion = "35.0.0"
 
     defaultConfig {
         applicationId = "com.facefusion.mobile$idSuffix"
@@ -368,10 +370,11 @@ android {
     externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
+            version = "3.28.3"
         }
     }
-    ndkVersion = "27.2.12479018"
+    // The build sandbox provides NDK r29; keep this aligned with the selected toolchain.
+    ndkVersion = "29.0.14206865"
 
     // The QNN runtime .so files ship in jniLibs and are dlopen'd by libffnative.so at
     // runtime.  They are NOT exec'd: a process exec'd out of the APK is denied the Hexagon
