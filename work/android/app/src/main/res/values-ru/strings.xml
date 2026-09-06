@@ -55,6 +55,7 @@
     <string name="proc_get_cancel">Не сейчас</string>
 
     <string name="swap_clip">Клип</string>
+    <string name="swap_clip_rate">Клип и частота кадров</string>
     <string name="swap_clip_summary">%1$d кадров из %2$s   %3$d fps</string>
     <string name="swap_frame_rate">Частота кадров</string>
     <string name="swap_rate_same">Как в исходнике (%1$d)</string>
@@ -319,4 +320,9 @@
     <string name="set_tab_device">Устройство</string>
     <string name="set_tab_api">API</string>
     <string name="set_tab_about">О программе</string>
+    <string name="set_theme_title">Тема</string>
+    <string name="set_theme_dark">Тёмная тема</string>
+    <string name="set_theme_follow_system">По системе</string>
+    <string name="set_theme_desc_dark">Тёмная</string>
+    <string name="set_theme_desc_light">Светлая</string>
 </resources>

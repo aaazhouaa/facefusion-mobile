@@ -79,6 +79,8 @@
     <string name="proc_get_cancel">Not now</string>
 
     <string name="swap_clip">Clip</string>
+    <!-- One foldable card holding BOTH the trim and the frame rate -->
+    <string name="swap_clip_rate">Clip &amp; frame rate</string>
     <!-- %1$d frames, %2$s duration, %3$d frames per second -->
     <string name="swap_clip_summary">%1$d frames of %2$s   %3$d fps</string>
     <string name="swap_frame_rate">Frame rate</string>
@@ -412,6 +414,8 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="live_fast_confirm_ok">Turn it off</string>
     <string name="common_cancel">Cancel</string>
     <string name="common_delete">Delete</string>
+    <string name="common_expand">Expand</string>
+    <string name="common_collapse">Collapse</string>
     <string name="swap_capture_source">Take a source photo</string>
     <string name="swap_voice_record">Record a voice</string>
     <string name="swap_voice_stop">Stop recording</string>
@@ -423,4 +427,9 @@ Turning it off runs your own Swap settings instead. This is experimental: the en
     <string name="set_tab_device">Device</string>
     <string name="set_tab_api">API</string>
     <string name="set_tab_about">About</string>
+    <string name="set_theme_title">Theme</string>
+    <string name="set_theme_dark">Dark mode</string>
+    <string name="set_theme_follow_system">Following system</string>
+    <string name="set_theme_desc_dark">Dark</string>
+    <string name="set_theme_desc_light">Light</string>
 </resources>

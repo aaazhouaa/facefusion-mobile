@@ -172,6 +172,13 @@ class MainActivity : ComponentActivity() {
 
     /** "" | "qnn" | "ncnn" -- the runtime pinned in Settings, mirrored for composition. */
     private var forcedBackend by mutableStateOf("")
+    /**
+     * The user's manual light/dark choice, or null to follow the system.
+     *
+     * Mirrored for composition and written by the Settings switch; persisted in
+     * [ThemePrefs] so the choice survives a restart.
+     */
+    private var darkTheme by mutableStateOf<Boolean?>(null)
     private var confirmMetered by mutableStateOf(false)
 
     /**
@@ -525,6 +532,9 @@ class MainActivity : ComponentActivity() {
         }
         ModelPaths.apply(this)
         forcedBackend = ModelPaths.forcedBackend(this)
+        // Restore the manual theme choice (if any) BEFORE the first composition, so a
+        // pinned dark mode does not flash the light scheme on launch.
+        darkTheme = ThemePrefs.load(this)
         modelDir()
         opts = SwapOptions.load(this)
         ApiService.restore(this)
@@ -591,7 +601,7 @@ class MainActivity : ComponentActivity() {
         if (intent?.getStringExtra("download") != null) onDownloadTapped()
 
         setContent {
-            FaceFusionTheme {
+            FaceFusionTheme(darkTheme) {
                 // The download runs in a service, on its own thread. Rather than trust a
                 // cross-thread state write to invalidate exactly the right scope, re-read
                 // the disk while it matters; the loop exits as soon as the set is complete.
@@ -813,6 +823,14 @@ class MainActivity : ComponentActivity() {
                                 onForceBackend =
                                     if (NativePipe.hasNcnnBackend()) ::onForceBackend
                                     else null,
+                                // The manual theme choice (null = follow the system) and
+                                // the switch that makes one. Saved immediately so a restart
+                                // keeps it -- see ThemePrefs.
+                                darkTheme = darkTheme,
+                                onSetTheme = { dark ->
+                                    darkTheme = dark
+                                    ThemePrefs.save(this@MainActivity, dark)
+                                },
                             )
                         }
                     }

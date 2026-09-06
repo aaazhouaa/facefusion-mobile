@@ -52,6 +52,7 @@
     <string name="proc_get_cancel">暫不</string>
 
     <string name="swap_clip">片段</string>
+    <string name="swap_clip_rate">片段與影格率</string>
     <string name="swap_clip_summary">%1$d 影格，共 %2$s   %3$d fps</string>
     <string name="swap_frame_rate">影格率</string>
     <string name="swap_rate_same">與原片相同 (%1$d)</string>
@@ -338,4 +339,9 @@
     <string name="set_tab_device">裝置</string>
     <string name="set_tab_api">API</string>
     <string name="set_tab_about">關於</string>
+    <string name="set_theme_title">主題</string>
+    <string name="set_theme_dark">深色模式</string>
+    <string name="set_theme_follow_system">跟隨系統</string>
+    <string name="set_theme_desc_dark">深色</string>
+    <string name="set_theme_desc_light">淺色</string>
 </resources>

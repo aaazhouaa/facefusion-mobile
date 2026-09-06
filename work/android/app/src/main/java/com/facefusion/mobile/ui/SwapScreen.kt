@@ -29,9 +29,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.facefusion.mobile.FaceDetectorCard
@@ -48,6 +51,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import com.facefusion.mobile.R
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.PlayArrow
 
 /** Everything the two preview panes need to draw themselves. */
 data class PreviewUi(
@@ -186,14 +190,21 @@ fun SwapScreen(
 ) {
     val idle = !run.busy && !run.preparing
 
-    // Both panes share one height, chosen so the pair fits on screen together with the
-    // controls around them. The reserve is the wordmark, source button, captions, trim,
-    // Swap and the nav bar; whatever is left is split in two.
+    // The result pane sizes itself from the TARGET's own dimensions (60%, see below), so
+    // it needs the screen width to clamp against; `screenH` still feeds the fallback
+    // height and the video output pane.
     val screenH = LocalConfiguration.current.screenHeightDp
+    val screenW = LocalConfiguration.current.screenWidthDp
     // Side-by-side panes are half as wide, so they can afford to be taller: the pair costs
     // ONE pane's height instead of two, which is the whole reason portrait gets this layout.
-    val paneHeight = if (targetAspect < 1f) (screenH - 400).coerceIn(200, 460).dp
-                     else ((screenH - 470) / 2).coerceIn(140, 320).dp
+    //
+    // ⚠ Budgets are TIGHT on purpose. Every dp the panes take is a dp the Swap button is
+    // pushed below the fold; the report "the button vanished after picking a target" was
+    // this arithmetic, not a rendering bug. The processor card is collapsed by default (see
+    // processorsExpanded) and the trim card too, so the panes are the only large blocks on
+    // a fresh target -- and even so their combined height has to leave room for the button.
+    val paneHeight = if (targetAspect < 1f) (screenH - 480).coerceIn(140, 300).dp
+                     else ((screenH - 560) / 2).coerceIn(100, 240).dp
 
     // ONE instance for every pane, which is what makes them zoom together (item 4).
     val zoom = remember { ZoomState() }
@@ -206,12 +217,27 @@ fun SwapScreen(
     // does not close it mid-adjustment.
     var settingsFor by rememberSaveable { mutableStateOf<String?>(null) }
     var confirmDeleteOutput by rememberSaveable { mutableStateOf(false) }
+    // The processor stages collapse under their title. Default CLOSED: three chips plus a
+    // caption cost ~160 dp standing, and a fresh target already carries the workbench row
+    // and the swapped pane -- the Swap button used to be pushed below the fold by exactly
+    // that much. The header's "n / 3" readout still says how many stages are armed, so a
+    // folded card is not a silent one. The state is saved so a rotation does not silently
+    // re-open a row the user just folded away.
+    var processorsExpanded by rememberSaveable { mutableStateOf(false) }
+    // Clip + frame rate live on ONE foldable card, default CLOSED: they are per-run
+    // tuning, and two standing controls pushed the Swap button off the first screen
+    // every time a video target was picked.
+    var trimExpanded by rememberSaveable { mutableStateOf(false) }
+    // The log panel folds under its caption. Default CLOSED -- it is a debug readout,
+    // and a standing 170 dp panel below the buttons made the page longer than it needed
+    // to be on every screen, not just while something was running.
+    var logExpanded by rememberSaveable { mutableStateOf(false) }
     Column(
         modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         // ---------------------------------------------------------------- processors
         //
@@ -225,12 +251,28 @@ fun SwapScreen(
         // a control that cannot be turned off should still be visible, because the row is
         // there to say WHICH stages will run.
         run {
-            Caption(stringResource(R.string.swap_processors))
+            // The stages live on their own card -- see SectionCard -- so the chips read as
+            // one thing that belongs together rather than a row adrift in the scroll. The
+            // trailing readout says how many of the three stages are armed, which the
+            // chips themselves only imply.
+            SectionCard(
+                stringResource(R.string.swap_processors),
+                trailing = {
+                    Text(
+                        "${listOf(true, opts.faceEnhance, opts.lipSync).count { it }} / 3",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                },
+                collapsible = true,
+                expanded = processorsExpanded,
+                onToggle = { processorsExpanded = !processorsExpanded },
+            ) {
             // Styled after upstream FaceFusion's own web UI, which is what these controls
-            // are a port of: ON is a solid red chip with a white label and a filled darker
-            // circle holding a white tick; OFF is a plain surface chip with a flat grey
-            // disc and no tick. Both colours are sampled from a screenshot of it --
-            // #EF4444 and #DC2626, in ui/Theme.kt.
+            // are a port of: ON is a solid accent chip with a contrasting label and a
+            // filled disc holding a check; OFF is a plain surface chip with a flat grey
+            // disc and no check. The accent is the theme's monochrome primary (dark on
+            // light scheme, light on dark), defined in ui/Theme.kt.
             //
             // Deliberately NOT Material3's default FilterChip look, which says "selected"
             // with a faint tonal wash and a bare tick. Upstream's row is the thing a user
@@ -256,7 +298,8 @@ fun SwapScreen(
                     onClick = { if (installed) onToggle() else onRequestModel(name, model) },
                     enabled = clickable,
                     shape = RoundedCornerShape(8.dp),
-                    color = if (active) FfRed else MaterialTheme.colorScheme.surfaceVariant,
+                    color = if (active) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surfaceVariant,
                     // No border on the red: a solid chip that also has an outline reads as
                     // two controls stacked.
                     border = if (active) null
@@ -273,7 +316,7 @@ fun SwapScreen(
                                 .clip(CircleShape)
                                 .background(
                                     when {
-                                        active -> FfRedDeep
+                                        active -> MaterialTheme.colorScheme.onPrimary
                                         // A model that is not on the device gets a hollow
                                         // disc, so "off" and "not installed" are not the
                                         // same picture. Upstream has no such state.
@@ -291,7 +334,7 @@ fun SwapScreen(
                         ) {
                             if (active) {
                                 Icon(Icons.Default.Check, null, Modifier.size(12.dp),
-                                     tint = Color.White)
+                                     tint = MaterialTheme.colorScheme.primary)
                             } else if (!installed) {
                                 Icon(Icons.Default.Add, null, Modifier.size(12.dp),
                                      tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -301,7 +344,7 @@ fun SwapScreen(
                             name,
                             style = MaterialTheme.typography.labelLarge,
                             color = when {
-                                active -> Color.White
+                                active -> MaterialTheme.colorScheme.onPrimary
                                 !installed -> MaterialTheme.colorScheme.onSurfaceVariant
                                 else -> MaterialTheme.colorScheme.onSurface
                             },
@@ -396,6 +439,7 @@ fun SwapScreen(
                         onSettings = { settingsFor = "lipsync" },
                     )
                 }
+                }
             }
         }
 
@@ -448,52 +492,92 @@ fun SwapScreen(
             }
         }
 
-        // ---------------------------------------------------------------- inputs
+        // ---------------------------------------------------------------- workbench
         //
-        // The source is a PANE, the same size and shape as the target's. It used to be a
-        // 52 dp thumbnail beside a full-width button, which made the two inputs look like
-        // different kinds of thing -- one a picture, one a command -- when they are the
-        // same kind of thing: an image you choose by tapping its own frame.
-        // EMPTY it is a full-width drop target, the same size and shape as the target's,
-        // because an empty pane is a call to action and has to be easy to hit. FILLED it
-        // collapses -- but in HEIGHT ONLY. The source is one face that never changes during
-        // a run, and a full-height pane was spending a third of the screen restating a
-        // decision already made; that cost was always the vertical one.
-        //
-        // ⚠ It used to collapse in BOTH axes, to a 104 dp square, and the width was pure
-        // loss: the space to its right sat empty while the caption row inside it had to fit
-        // "SOURCE FACE" plus a camera and a delete button into 104 dp, so the label wrapped
-        // onto two lines. The image does not stretch -- PreviewPane draws it
-        // ContentScale.Fit, so a wider box is more room for the caption and more letterbox
-        // around the same picture, at the same aspect ratio.
-        val sourceBox = 104.dp
-        Box(Modifier.fillMaxWidth()) {
-            PreviewPane(
+        // SOURCE and TARGET share one 72 dp row, and BOTH are always on screen -- an empty
+        // slot is a call to action, and neither input may push the other off the first
+        // screen. The source is a face that never changes during a run, so it stays a
+        // thumbnail for its whole life; the target tile doubles as the ORIGINAL half of
+        // the before/after -- its frame shows the source frame of the swap -- so there is
+        // no separate full-width "original" pane below any more.
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            FaceTile(
                 label = stringResource(R.string.swap_source_face),
-                height = if (hasSource) sourceBox else paneHeight,
                 bitmap = sourceThumb,
                 placeholder = stringResource(R.string.swap_source_pick),
+                modifier = Modifier.weight(1f),
                 onClick = if (idle) onPickSource else null,
                 actionIcon = if (hasSource) null else Icons.Default.Add,
-                // NOT the shared zoom. The source is a different image from the target, so
-                // panning them together would be a gesture with no meaning.
-                zoom = null,
             ) {
                 // Shoot a face instead of finding one. Stills only: a source is an
                 // identity, and there is no video form of that.
                 if (idle) {
-                    IconButton(onCaptureSource, Modifier.size(28.dp)) {
+                    IconButton(onCaptureSource, Modifier.size(26.dp)) {
                         Icon(painterResource(R.drawable.ic_photo_camera),
-                             stringResource(R.string.swap_capture_source), Modifier.size(16.dp))
+                             stringResource(R.string.swap_capture_source), Modifier.size(14.dp))
                     }
                 }
                 // Removing the source is not destructive -- it drops a reference to a photo
                 // the user still has -- so unlike the output it does not confirm.
                 if (hasSource && idle) {
-                    IconButton(onClearSource, Modifier.size(28.dp)) {
+                    IconButton(onClearSource, Modifier.size(26.dp)) {
                         Icon(Icons.Default.Delete,
                              stringResource(R.string.swap_remove_source),
-                             Modifier.size(16.dp))
+                             Modifier.size(14.dp))
+                    }
+                }
+            }
+            FaceTile(
+                // The tile names what it holds: TARGET while asking for one, ORIGINAL once
+                // it is showing the source frame. The timestamp is dropped here -- the
+                // tile's badge is a 9 sp plate, and a clock string does not survive that.
+                label = stringResource(if (hasTarget) R.string.swap_pane_original
+                                       else R.string.swap_pane_target),
+                bitmap = preview.original,
+                placeholder = stringResource(when {
+                    run.preparing -> R.string.swap_reading_video
+                    hasTarget -> R.string.swap_seeking
+                    else -> R.string.swap_add_target
+                }),
+                modifier = Modifier.weight(1f),
+                // The tile IS the picker. A separate full-width button said the same thing
+                // twice and cost a row of height the wordmark needed.
+                onClick = if (idle) onPickTarget else null,
+                actionIcon = if (hasTarget) null else Icons.Default.Add,
+            ) {
+                // CAMERA, beside the gallery pick, shown while the tile is EMPTY -- which
+                // is when someone deciding what to swap needs it. Two buttons because a
+                // still and a clip take different routes through the system camera, and
+                // one button that then asks which is a tap for a question the icons answer.
+                if (!hasTarget) {
+                    IconButton(onCapturePhoto, enabled = idle, modifier = Modifier.size(26.dp)) {
+                        Icon(painterResource(R.drawable.ic_photo_camera),
+                             stringResource(R.string.swap_capture_photo), Modifier.size(14.dp),
+                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    IconButton(onCaptureVideo, enabled = idle, modifier = Modifier.size(26.dp)) {
+                        Icon(painterResource(R.drawable.ic_videocam),
+                             stringResource(R.string.swap_capture_video), Modifier.size(14.dp),
+                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                if (hasTarget) {
+                    // Icons rather than the word "Change": two actions fit where one word
+                    // did, and the tile is already the picker, so the word was saying a
+                    // third time what the tap and the + icon already say.
+                    IconButton(onPickTarget, enabled = idle, modifier = Modifier.size(26.dp)) {
+                        Icon(Icons.Default.Add, stringResource(R.string.swap_choose_another_target),
+                             Modifier.size(14.dp),
+                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    IconButton(onClearTarget, enabled = idle, modifier = Modifier.size(26.dp)) {
+                        Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_target),
+                             Modifier.size(14.dp),
+                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -505,145 +589,132 @@ fun SwapScreen(
         // full-width boxes is mostly empty grey, because ContentScale.Fit letterboxes a
         // 9:16 image into a 16:9 box and throws away about two thirds of the width. Side by
         // side, each pane is half as wide and the image fills it.
-        val portrait = targetAspect < 1f
-        val panes: @Composable (Modifier) -> Unit = { paneModifier ->
-            PreviewPane(
-                // "ORIGINAL" is the BEFORE half of a before/after, and there is no before
-                // until a target exists -- an empty box labelled "original" names something
-                // that is not there. So before a target it says TARGET instead, which is
-                // what the pane is ASKING for and the counterpart of SOURCE FACE above.
-                // (It was blank, which left the one pane on the screen with no name at all.)
-                label = when {
-                    !hasTarget -> stringResource(R.string.swap_pane_target)
-                    preview.timeLabel.isEmpty() ->
-                        stringResource(R.string.swap_pane_original)
-                    else -> stringResource(R.string.swap_pane_original_at, preview.timeLabel)
-                },
-                height = paneHeight,
-                bitmap = preview.original,
-                placeholder = stringResource(when {
-                    run.preparing -> R.string.swap_reading_video
-                    hasTarget -> R.string.swap_seeking
-                    else -> R.string.swap_add_target
-                }),
-                modifier = paneModifier,
-                // The pane IS the picker. A separate full-width button said the same thing
-                // twice and cost a row of height the wordmark needed.
-                onClick = if (idle) onPickTarget else null,
-                actionIcon = if (hasTarget) null else Icons.Default.Add,
-                zoom = zoom,
-            ) {
-                // CAMERA, beside the gallery pick, and shown while the pane is EMPTY --
-                // which is when someone deciding what to swap needs it. Two buttons because
-                // a still and a clip take different routes through the system camera, and
-                // one button that then asks which is a tap for a question the icons answer.
-                if (!hasTarget) {
-                    IconButton(onCapturePhoto, enabled = idle, modifier = Modifier.size(36.dp)) {
-                        Icon(painterResource(R.drawable.ic_photo_camera),
-                             stringResource(R.string.swap_capture_photo), Modifier.size(20.dp),
-                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    IconButton(onCaptureVideo, enabled = idle, modifier = Modifier.size(36.dp)) {
-                        Icon(painterResource(R.drawable.ic_videocam),
-                             stringResource(R.string.swap_capture_video), Modifier.size(20.dp),
-                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                if (hasTarget) {
-                    // Icons rather than the word "Change": two actions fit where one word
-                    // did, and the pane itself is already the picker, so the word was
-                    // saying a third time what the tap and the + icon already say.
-                    IconButton(onPickTarget, enabled = idle, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Default.Add, stringResource(R.string.swap_choose_another_target),
-                             Modifier.size(20.dp),
-                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    IconButton(onClearTarget, enabled = idle, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_target),
-                             Modifier.size(20.dp),
-                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
+        // ---------------------------------------------------------------- result
+        //
+        // The result of the swap gets a pane of its own, sized from the TARGET: its frame
+        // is the after half of the before/after the workbench row shows, so it inherits the
+        // target's aspect -- at 60% of the target's own width/height, which is what "the
+        // pane opens to the swapped result" reads as without the two panes being identical
+        // in size. The 60% is applied to the target's PIXEL dimensions and converted to dp
+        // at the current density, then clamped to the available width so a wide target
+        // never overflows the screen.
+        val density = LocalDensity.current
+        val maxPaneW = (screenW - 36).dp
+        // ⚠ The result pane's height has a CEILING, or a tall target eats the screen:
+        // 60% of a portrait photo's 4000 px is 2400 px, which is taller than a phone.
+        // The pane used to size itself freely, and the Swap button -- everything below
+        // the pane, really -- slid off the first screen; the button was still THERE and
+        // still clickable at the edge of the fold, it just could not be seen. The width
+        // stays the 60% figure; only the height is capped, so the run controls below
+        // always stay visible.
+        //
+        // The cap itself was tightened after the first fix because 60% of a portrait
+        // frame still measured ~384 dp on a 9:16 clip -- which, on a 720 dp screen with
+        // the workbench row and the (now folded) processor card, put the button back
+        // below the fold. (screenH - 500) keeps the swap button on the first screen for
+        // every orientation; the pane letterboxes instead, which a preview can afford.
+        val maxResultH = (screenH - 500).dp.coerceIn(140.dp, 260.dp)
+        val tW = preview.original?.width ?: 0
+        val tH = preview.original?.height ?: 0
+        val resultW: Dp
+        var resultH: Dp
+        if (tW > 0 && tH > 0) {
+            val w = with(density) { (tW * 0.6f).toInt().toDp() }
+            val h = with(density) { (tH * 0.6f).toInt().toDp() }
+            if (w <= maxPaneW) {
+                resultW = w
+                resultH = h
+            } else {
+                resultW = maxPaneW
+                resultH = maxPaneW * (tH.toFloat() / tW.toFloat())
             }
+        } else {
+            resultW = maxPaneW
+            resultH = paneHeight
+        }
+        resultH = resultH.coerceAtMost(maxResultH)
 
-            // Hidden until BOTH inputs exist. An empty output pane repeats the
-            // instruction the input panes already give, in the same words, and it takes
-            // the height of a whole pane to do it -- so before anything is picked the
-            // screen was two thirds placeholder text.
+        // Hidden until BOTH inputs exist. An empty output pane repeats the
+        // instruction the input tiles already give, in the same words, and it takes
+        // the height of a whole pane to do it -- so before anything is picked the
+        // screen was two thirds placeholder text.
+        //
+        // `|| modelsMissing` because the download overlay lives on this pane -- it is
+        // the one that cannot draw without the models -- so hiding it unconditionally
+        // would leave a fresh install with no way to fetch them.
+        if ((hasSource && hasTarget) || modelsMissing) PreviewPane(
+            label = stringResource(R.string.swap_pane_swapped),
+            height = resultH,
+            bitmap = preview.swapped,
+            placeholder = when {
+                modelsMissing -> ""
+                // Already a finished, localized sentence from the Activity -- notably
+                // the content gate's refusal, which must not be rebuilt here.
+                preview.note != null -> preview.note
+                preview.busy && !preview.warm ->
+                    stringResource(R.string.swap_loading_models)
+                preview.busy -> stringResource(R.string.swap_swapping_frame)
+                !hasSource -> stringResource(R.string.swap_pick_a_source)
+                // No "tap refresh" any more: the preview warms itself as soon as both
+                // inputs exist, so this is a transient state rather than an instruction.
+                else -> stringResource(R.string.swap_preparing_preview)
+            },
+            // The pane's width is the 60% figure, not fillMaxWidth: the result is meant
+            // to read as "the target, at 60%", so a fixed proportional box is the point.
+            modifier = Modifier.width(resultW),
+            // The download lives here rather than in a bar of its own: this is the pane
+            // that cannot draw anything without the models, so it is where their absence
+            // is already visible.
+            overlay = if (modelsMissing) { { DownloadOverlay(onDownload) } } else null,
+            zoom = zoom,
+        ) {
+            // Spinner WHILE working, save button when there is something to save. Never
+            // both: the fixed slot height in PreviewPane keeps either from moving the
+            // trim slider and the Swap button down the screen mid-interaction.
             //
-            // `|| modelsMissing` because the download overlay lives on this pane -- it is
-            // the one that cannot draw without the models -- so hiding it unconditionally
-            // would leave a fresh install with no way to fetch them.
-            if ((hasSource && hasTarget) || modelsMissing) PreviewPane(
-                label = stringResource(R.string.swap_pane_swapped),
-                height = paneHeight,
-                bitmap = preview.swapped,
-                placeholder = when {
-                    modelsMissing -> ""
-                    // Already a finished, localized sentence from the Activity -- notably
-                    // the content gate's refusal, which must not be rebuilt here.
-                    preview.note != null -> preview.note
-                    preview.busy && !preview.warm ->
-                        stringResource(R.string.swap_loading_models)
-                    preview.busy -> stringResource(R.string.swap_swapping_frame)
-                    !hasSource -> stringResource(R.string.swap_pick_a_source)
-                    // No "tap refresh" any more: the preview warms itself as soon as both
-                    // inputs exist, so this is a transient state rather than an instruction.
-                    else -> stringResource(R.string.swap_preparing_preview)
-                },
-                modifier = paneModifier,
-                // The download lives here rather than in a bar of its own: this is the pane
-                // that cannot draw anything without the models, so it is where their absence
-                // is already visible.
-                overlay = if (modelsMissing) { { DownloadOverlay(onDownload) } } else null,
-                zoom = zoom,
-            ) {
-                // Spinner WHILE working, save button when there is something to save. Never
-                // both: the fixed slot height in PreviewPane keeps either from moving the
-                // trim slider and the Swap button down the screen mid-interaction.
-                //
-                // The save writes the previewed frame straight out of the pane. The output
-                // pane has had a Save frame button since the video path existed, but it can
-                // only reach frames of a FINISHED run -- so pulling one still out of a clip
-                // meant swapping the whole clip first.
-                if (!preview.busy && preview.swapped != null) {
-                    IconButton(onClick = onSavePreviewFrame, enabled = idle) {
-                        Icon(
-                            IconDownload,
-                            stringResource(R.string.out_save_frame),
-                            Modifier.size(18.dp),
-                        )
-                    }
-                }
-                if (preview.busy) {
-                    CircularProgressIndicator(
+            // The save writes the previewed frame straight out of the pane. The output
+            // pane has had a Save frame button since the video path existed, but it can
+            // only reach frames of a FINISHED run -- so pulling one still out of a clip
+            // meant swapping the whole clip first.
+            if (!preview.busy && preview.swapped != null) {
+                IconButton(onClick = onSavePreviewFrame, enabled = idle) {
+                    Icon(
+                        IconDownload,
+                        stringResource(R.string.out_save_frame),
                         Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-        }
-
-        if (portrait) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                panes(Modifier.weight(1f))
+            if (preview.busy) {
+                CircularProgressIndicator(
+                    Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-        } else {
-            panes(Modifier)
         }
 
         // ---------------------------------------------------------------- trim
+        //
+        // Clip and frame rate share ONE foldable card, closed by default. They are
+        // per-run tuning knobs, not standing controls, and two standing controls -- the
+        // range slider plus the rate steps -- pushed the Swap button off the first
+        // screen on every video target. The card keeps the chosen range in its header,
+        // so the trim stays readable while folded.
         if (durationMs > 0) {
-            Column {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Caption(stringResource(R.string.swap_clip), Modifier.weight(1f))
+            SectionCard(
+                stringResource(R.string.swap_clip_rate),
+                trailing = {
                     Text(
                         "${fmt(trimStartMs)} – ${fmt(trimEndMs)}",
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
                     )
-                }
+                },
+                collapsible = true,
+                expanded = trimExpanded,
+                onToggle = { trimExpanded = !trimExpanded },
+            ) {
                 RangeSlider(
                     value = trimStartMs..trimEndMs,
                     onValueChange = { r ->
@@ -688,7 +759,6 @@ fun SwapScreen(
                                 .map { it to "$it" } +
                             listOf(0 to stringResource(R.string.swap_rate_same, inputFps))
                 if (rates.size > 1) {
-                    Spacer(Modifier.height(6.dp))
                     OptionSteps(
                         stringResource(R.string.swap_frame_rate),
                         rates,
@@ -710,16 +780,81 @@ fun SwapScreen(
         // A still target has no button at all. The pane above IS the output, so a Swap
         // button would offer to compute something the user is already looking at, and the
         // Save button below is the only thing left to do.
-        if (!imageTarget) Button(
-            onClick = if (run.busy) onCancel else onSwap,
-            enabled = run.busy || (idle && hasSource && hasTarget && !modelsMissing &&
-                                    (!opts.lipSync || hasVoice)),
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-            // 14.dp everywhere: the stadium default made the two primary buttons the only
-            // fully-round things on a screen of 14.dp panes and cards.
-            shape = RoundedCornerShape(14.dp),
-        ) { Text(stringResource(if (run.busy) R.string.swap_cancel else R.string.swap_action),
-                 fontSize = 16.sp) }
+        if (!imageTarget) {
+            // The primary action carries the brand gradient -- the same sweep as the
+            // header, FaceFusion red deepening to its hover state -- and a play mark, so
+            // the one thing that starts a run reads as the thing that starts a run. While
+            // busy it flips to a bordered cancel, because a solid red button that now says
+            // "Cancel" would look like a run that is still inviting to be started.
+            val busy = run.busy
+            // READY = 两个输入都在、模型齐、Lip Sync 有驱动音。它刻意不含 idle：
+            // 添加目标后要复制视频文件并读元数据（preparing，可能耗时数秒），期间
+            // 若把按钮压成半透明灰，用户看到"目标已选好按钮却是灰的"会以为坏了。
+            val ready = hasSource && hasTarget && !modelsMissing &&
+                        (!opts.lipSync || hasVoice)
+            val canRun = idle && ready
+            // 只有真正缺条件才置灰；preparing 期间按钮保持品牌色，只是暂时不可点。
+            val dimmed = !busy && !ready
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    // Background as a Modifier branch, not an if/else argument: each
+                    // outcome is a single Color (disabled uses a SOLID surfaceVariant fill,
+                    // not alpha on the accent -- alpha made a colour-under-grey smear that
+                    // read as broken, and it is what "the button shows as semi-transparent
+                    // grey until you touch it" was -- the preparing window during target
+                    // load). The enabled fill is the theme's monochrome primary.
+                    .then(
+                        when {
+                            busy -> Modifier.background(Color.Transparent)
+                            dimmed -> Modifier.background(
+                                MaterialTheme.colorScheme.surfaceVariant)
+                            else -> Modifier.background(
+                                MaterialTheme.colorScheme.primary)
+                        }
+                    )
+                    .border(
+                        if (busy) 1.dp else 0.dp,
+                        MaterialTheme.colorScheme.error,
+                        RoundedCornerShape(16.dp),
+                    )
+                    .clickable(enabled = busy || canRun) {
+                        if (busy) onCancel() else onSwap()
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (!busy) {
+                        Icon(
+                            Icons.Default.PlayArrow,
+                            stringResource(R.string.swap_action),
+                            Modifier.size(22.dp),
+                            // Dim the icon with the text when conditions are truly missing;
+                            // during preparing it stays the onPrimary contrast on the
+                            // primary button.
+                            tint = if (dimmed) MaterialTheme.colorScheme.onSurfaceVariant
+                                   else MaterialTheme.colorScheme.onPrimary,
+                        )
+                    }
+                    Text(
+                        stringResource(if (busy) R.string.swap_cancel else R.string.swap_action),
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 0.5.sp,
+                        color = when {
+                            busy -> MaterialTheme.colorScheme.error
+                            dimmed -> MaterialTheme.colorScheme.onSurfaceVariant
+                            else -> MaterialTheme.colorScheme.onPrimary
+                        },
+                    )
+                }
+            }
+        }
 
         if (run.busy || run.progress > 0f) {
             LinearProgressIndicator(
@@ -805,7 +940,8 @@ fun SwapScreen(
         }
 
         // ---------------------------------------------------------------- log
-        if (log.isNotEmpty()) LogBox(log)
+        if (log.isNotEmpty()) LogBox(log, expanded = logExpanded,
+                                     onToggle = { logExpanded = !logExpanded })
 
         Spacer(Modifier.height(8.dp))
     }

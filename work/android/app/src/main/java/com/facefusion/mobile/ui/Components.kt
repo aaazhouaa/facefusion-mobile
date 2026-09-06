@@ -2,10 +2,10 @@ package com.facefusion.mobile.ui
 
 import android.graphics.Bitmap
 import android.widget.VideoView
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -37,6 +37,8 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -83,14 +85,14 @@ fun AppMark(size: Dp = 30.dp, modifier: Modifier = Modifier) {
  * it this is just a heading in caps.
  */
 @Composable
-fun Wordmark(modifier: Modifier = Modifier) {
+fun Wordmark(modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.onBackground) {
     Text(
         buildAnnotatedString {
             withStyle(SpanStyle(fontWeight = FontWeight.Light)) { append("FACE") }
             withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("FUSION") }
         },
         style = WordmarkStyle,
-        color = MaterialTheme.colorScheme.onBackground,
+        color = color,
         modifier = modifier,
     )
 }
@@ -130,6 +132,92 @@ fun Caption(text: String, modifier: Modifier = Modifier) {
         fontSize = 11.sp,
         modifier = modifier,
     )
+}
+
+/**
+ * A labelled group card, the visual "room" the Swap screen is divided into.
+ *
+ * The screen used to be one long scroll of chips, panes and buttons with nothing saying
+ * which things belonged together. This is the divider: one card per group (the processor
+ * stages, the workbench, the output), with the brand-red square as its mark — the same
+ * mark the wordmark's two-weight break carries — and a trailing slot for a live status
+ * readout such as which stages are armed.
+ *
+ * Deliberately `surface`, not `surfaceVariant`: the card is the step the panes sit ON,
+ * and the panes inside it are already the recessed step. Nesting both the other way made
+ * the card read as a hole in the page.
+ */
+@Composable
+fun SectionCard(
+    title: String,
+    modifier: Modifier = Modifier,
+    trailing: @Composable RowScope.() -> Unit = {},
+    // Collapsible behaviour, opt-in. When [onToggle] is non-null the whole title row
+    // becomes the tap target and [content] animates in/out under it; the trailing arrow
+    // flips with the state so the affordance reads without a tap.
+    //
+    // ⚠ These sit BEFORE [content] deliberately: a trailing lambda at the call site binds
+    // to the LAST parameter, so content must stay last or the block goes to onToggle.
+    collapsible: Boolean = false,
+    expanded: Boolean = true,
+    onToggle: (() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.then(
+                if (onToggle != null) Modifier
+                    // Slightly larger than the visual title so the whole band is easy to
+                    // hit, but not full-width-bleed: the card's own padding already frames
+                    // it, and an 100%-wide target would make accidental collapses common.
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable(onClick = onToggle)
+                    .padding(vertical = 2.dp)
+                else Modifier
+            ),
+        ) {
+            Box(
+                Modifier
+                    .size(10.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(MaterialTheme.colorScheme.primary),
+            )
+            Spacer(Modifier.width(8.dp))
+            Caption(title, Modifier.weight(1f))
+            trailing()
+            if (collapsible) {
+                Spacer(Modifier.width(6.dp))
+                Icon(
+                    Icons.Default.KeyboardArrowDown,
+                    stringResource(if (expanded) R.string.common_collapse
+                                   else R.string.common_expand),
+                    Modifier
+                        .size(20.dp)
+                        .rotate(if (expanded) 0f else 180f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        // Plain `if`, deliberately NOT AnimatedVisibility.
+        //
+        // ⚠ The animated version caused a real overlap: inside the page's verticalScroll,
+        // expanding a card that holds sliders (the trim card's RangeSlider carries a 48 dp
+        // touch target) could leave the drawn content overlapping the elements below it --
+        // the "expanded but contents overlap and can't be used" report. A conditional
+        // render has no transition in which measured height and drawn height disagree,
+        // so the overlap cannot happen. The chevron above still rotates, which keeps the
+        // fold affordance's motion.
+        if (expanded) content()
+    }
 }
 
 /**
@@ -215,7 +303,6 @@ fun PreviewPane(
     // minus the padding -- which is what stops the corners looking doubled.
     Column(
         modifier
-            .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(MaterialTheme.colorScheme.surface)
             .padding(horizontal = 6.dp, vertical = 5.dp)
@@ -224,7 +311,24 @@ fun PreviewPane(
             Modifier.fillMaxWidth().padding(start = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Caption(label, Modifier.weight(1f))
+            // A badge rather than a bare caption: the label names the pane, and a small
+            // recessed plate is how the name stops reading as a stray line of page text
+            // and starts reading as part of the pane. Same surfaceVariant as the image
+            // well, so the two line up like a label on a folder.
+            Text(
+                label.uppercase(),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                letterSpacing = 1.2.sp,
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+            )
             // Fixed HEIGHT, whatever the slot holds; width still wraps.
             //
             // It used to size to its content, and content alternated between an 18 dp
@@ -251,6 +355,8 @@ fun PreviewPane(
                 // 12, not 14: concentric with the container 18 minus its 6 dp padding.
                 .clip(RoundedCornerShape(12.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant,
+                        RoundedCornerShape(12.dp))
                 .then(
                     // Gestures only once there is an image: with none, the pane is purely a
                     // picker and `clickable` keeps its ripple and accessibility semantics.
@@ -323,24 +429,116 @@ fun PreviewPane(
             } else {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     if (actionIcon != null) {
                         Icon(
                             actionIcon, null,
-                            Modifier.size(40.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            Modifier.size(48.dp),
+                            // The pane's call to action gets the brand tint, not the flat
+                            // grey: an empty pane is a button asking to be tapped, and the
+                            // accent is how a button is recognised.
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
                         )
                     }
                     Text(
                         placeholder,
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 24.dp),
                     )
                 }
             }
             overlay?.invoke(this)
+        }
+    }
+}
+
+/**
+ * A compact 72 dp tile for the workbench row — source face on the left, target on the
+ * right.
+ *
+ * They used to be full-height panes; a portrait clip pushed them off the first screen and
+ * the panes competed with the stage chips for what a fresh install sees. A tile keeps both
+ * inputs permanently on screen: 72 dp tall whatever the state, width wrapping to whatever
+ * the row gives it, the label as a translucent plate ON the picture so the whole height is
+ * image, and the pick/remove actions tucked into the bottom corner.
+ */
+@Composable
+fun FaceTile(
+    label: String,
+    bitmap: Bitmap?,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    /** Makes the whole tile tappable — the target is picked by tapping its own frame. */
+    onClick: (() -> Unit)? = null,
+    /** Shown large and centred while [bitmap] is null, as the tile's call to action. */
+    actionIcon: ImageVector? = null,
+    /** Small actions (camera, change, delete…) over the tile's bottom-right corner. */
+    actions: @Composable () -> Unit = {},
+) {
+    Box(
+        modifier
+            .height(72.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap.asImageBitmap(), label,
+                Modifier.fillMaxSize().padding(3.dp),
+                contentScale = ContentScale.Fit,
+            )
+        } else {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (actionIcon != null) {
+                    Icon(
+                        actionIcon, null,
+                        Modifier.size(26.dp),
+                        // Same brand-tinted call-to-action as the full panes use, scaled
+                        // down to fit the tile's smaller plate.
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+                    )
+                }
+                Text(
+                    placeholder,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 6.dp),
+                )
+            }
+        }
+        // The name rides ON the picture so the tile's whole height is image; a caption row
+        // of its own would push the pair past the 72 dp the workbench row is budgeted for.
+        Text(
+            label.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            letterSpacing = 1.2.sp,
+            fontSize = 9.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(5.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+        Row(
+            Modifier.align(Alignment.BottomEnd).padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            actions()
         }
     }
 }
@@ -495,7 +693,9 @@ fun Accordion(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            AnimatedVisibility(expanded) {
+            // Same plain conditional as SectionCard: a transition here can draw the
+            // content over the elements below it inside a scrolling container.
+            if (expanded) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Spacer(Modifier.height(4.dp))
                     content()
@@ -508,29 +708,64 @@ fun Accordion(
 /**
  * The log, in a panel that scrolls on its own.
  *
- * The height is FIXED and must stay so: this sits inside the page's vertical scroll, and a
- * scrollable of unbounded height nested in another one cannot measure.
+ * The whole row is the toggle: tap "Log" (or its chevron) to fold the 170 dp panel away
+ * and tap again to bring it back. Default COLLAPSED -- the log is debug output, not a
+ * thing every visit needs open, and a standing 170 dp panel pushed the controls below it
+ * down the page.
+ *
+ * The height of the open panel is FIXED and must stay so: this sits inside the page's
+ * vertical scroll, and a scrollable of unbounded height nested in another one cannot
+ * measure.
  */
 @Composable
-fun LogBox(text: String, modifier: Modifier = Modifier) {
+fun LogBox(
+    text: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val scroll = rememberScrollState()
     // Follow the tail, which is the only part anyone reads while a run is going.
-    LaunchedEffect(text) { scroll.animateScrollTo(scroll.maxValue) }
+    LaunchedEffect(text, expanded) {
+        if (expanded) scroll.animateScrollTo(scroll.maxValue)
+    }
     Column(modifier.fillMaxWidth()) {
-        Caption(stringResource(R.string.out_log), Modifier.padding(bottom = 4.dp))
-        Surface(
-            Modifier.fillMaxWidth().height(170.dp),
-            shape = RoundedCornerShape(12.dp),
-            color = MaterialTheme.colorScheme.surfaceVariant,
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(onClick = onToggle)
+                .padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text,
-                Modifier.verticalScroll(scroll).padding(12.dp),
-                fontFamily = FontFamily.Monospace,
-                fontSize = 10.sp,
-                lineHeight = 14.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Caption(stringResource(R.string.out_log), Modifier.weight(1f))
+            Icon(
+                Icons.Default.KeyboardArrowDown,
+                stringResource(if (expanded) R.string.common_collapse
+                               else R.string.common_expand),
+                Modifier
+                    .size(20.dp)
+                    .rotate(if (expanded) 0f else 180f),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+        }
+        // Plain `if` for the same reason as SectionCard: AnimatedVisibility in this
+        // verticalScroll could draw the panel over what followed it mid-transition.
+        if (expanded) {
+            Surface(
+                Modifier.fillMaxWidth().height(170.dp).padding(top = 4.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+            ) {
+                Text(
+                    text,
+                    Modifier.verticalScroll(scroll).padding(12.dp),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 10.sp,
+                    lineHeight = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
