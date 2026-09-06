@@ -25,6 +25,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -298,12 +300,19 @@ fun SwapScreen(
                     onClick = { if (installed) onToggle() else onRequestModel(name, model) },
                     enabled = clickable,
                     shape = RoundedCornerShape(8.dp),
-                    color = if (active) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.surfaceVariant,
-                    // No border on the red: a solid chip that also has an outline reads as
-                    // two controls stacked.
-                    border = if (active) null
-                             else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    // The chip's fill matches the other controls (cards, buttons) -- the
+                    // theme's surface -- not the page background. Selection is carried by
+                    // the border (primary when a stage is ON, outlineVariant when off) and
+                    // the check disc, never by a fill.
+                    color = MaterialTheme.colorScheme.surface,
+                    border = BorderStroke(
+                        // A single hairline in both states: the border is a separator, not
+                        // a selection bar -- selection reads from the primary colour, the
+                        // check disc and the bold label.
+                        1.dp,
+                        if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.69f)
+                        else MaterialTheme.colorScheme.outlineVariant,
+                    ),
                 ) {
                     Row(
                         Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
@@ -316,7 +325,9 @@ fun SwapScreen(
                                 .clip(CircleShape)
                                 .background(
                                     when {
-                                        active -> MaterialTheme.colorScheme.onPrimary
+                                        // Filled with the accent (text colour) now that the
+                                        // chip itself is page-coloured.
+                                        active -> MaterialTheme.colorScheme.primary.copy(alpha = 0.69f)
                                         // A model that is not on the device gets a hollow
                                         // disc, so "off" and "not installed" are not the
                                         // same picture. Upstream has no such state.
@@ -334,7 +345,7 @@ fun SwapScreen(
                         ) {
                             if (active) {
                                 Icon(Icons.Default.Check, null, Modifier.size(12.dp),
-                                     tint = MaterialTheme.colorScheme.primary)
+                                     tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.69f))
                             } else if (!installed) {
                                 Icon(Icons.Default.Add, null, Modifier.size(12.dp),
                                      tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -344,10 +355,12 @@ fun SwapScreen(
                             name,
                             style = MaterialTheme.typography.labelLarge,
                             color = when {
-                                active -> MaterialTheme.colorScheme.onPrimary
+                                active -> MaterialTheme.colorScheme.onBackground
                                 !installed -> MaterialTheme.colorScheme.onSurfaceVariant
                                 else -> MaterialTheme.colorScheme.onSurface
                             },
+                            fontWeight = if (active) FontWeight.SemiBold
+                                        else FontWeight.Normal,
                             // ⚠ weight(fill = false) is what keeps every gear THE SAME
                             // SIZE. Row does not wrap, it SQUEEZES, and with two chips
                             // across a phone the squeeze landed on whichever child had no
@@ -376,7 +389,7 @@ fun SwapScreen(
                                     .size(18.dp)
                                     .clip(CircleShape)
                                     .clickable(enabled = idle) { onSettings() },
-                                tint = if (active) Color.White.copy(alpha = 0.85f)
+                                tint = if (active) MaterialTheme.colorScheme.onBackground
                                        else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
@@ -453,133 +466,180 @@ fun SwapScreen(
         // the native side changed -- only where the control is drawn.
 
         // Only while Lip Sync is ON. It is a
-        // REQUIRED input, not a tuning knob, so it is up here with source/target rather
-        // than in Advanced: the Swap button stays disabled without one (see its `enabled`
-        // below), because syncing a clip to the audio it already has has nothing to fix --
-        // upstream's lip syncer exists to dub a DIFFERENT voice on, and running it on the
-        // target's own track can only cost face quality with no corrective benefit.
-        if (opts.lipSync) PreviewPane(
-            label = stringResource(R.string.swap_pane_voice),
-            height = 64.dp,
-            bitmap = null,
-            placeholder = if (hasVoice) (voiceName ?: stringResource(R.string.swap_voice_picked))
-                          else stringResource(R.string.swap_voice_add),
-            onClick = if (idle && !hasVoice && !recordingVoice) onPickVoice else null,
-            actionIcon = if (hasVoice) null else Icons.Default.Add,
-        ) {
-            // RECORD, beside the picker. The lip syncer needs a voice that is not the
-            // target's own audio, and until now the only way to give it one was to already
-            // have the file -- so the phone's own microphone, which every user has, was the
-            // one source the feature could not use.
-            IconButton(onToggleRecordVoice, enabled = idle, modifier = Modifier.size(36.dp)) {
-                Icon(painterResource(if (recordingVoice) R.drawable.ic_stop
-                                     else R.drawable.ic_mic),
-                     stringResource(if (recordingVoice) R.string.swap_voice_stop
-                                    else R.string.swap_voice_record),
-                     Modifier.size(20.dp),
-                     tint = if (recordingVoice) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            if (hasVoice) {
-                IconButton(onPickVoice, enabled = idle, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.Add, stringResource(R.string.swap_choose_another_voice),
-                         Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                IconButton(onClearVoice, enabled = idle, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_voice),
-                         Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-        }
+        // REQUIRED input, not a tuning knob, so it sits in the workbench row between
+        // source and target rather than in Advanced: the Swap button stays disabled
+        // without one (see its `enabled` below), because syncing a clip to the audio it
+        // already has has nothing to fix -- upstream's lip syncer exists to dub a
+        // DIFFERENT voice on, and running it on the target's own track can only cost
+        // face quality with no corrective benefit.
 
         // ---------------------------------------------------------------- workbench
         //
-        // SOURCE and TARGET share one 72 dp row, and BOTH are always on screen -- an empty
-        // slot is a call to action, and neither input may push the other off the first
-        // screen. The source is a face that never changes during a run, so it stays a
-        // thumbnail for its whole life; the target tile doubles as the ORIGINAL half of
-        // the before/after -- its frame shows the source frame of the swap -- so there is
-        // no separate full-width "original" pane below any more.
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.Top,
+        // SOURCE and TARGET share one 72 dp row (VOICE joins it as a third equal slot
+        // while Lip Sync is on), and the inputs are always on screen -- an empty slot is
+        // a call to action, and neither input may push the other off the first screen.
+        // The source is a face that never changes during a run, so it stays a thumbnail
+        // for its whole life; the target tile doubles as the ORIGINAL half of the
+        // before/after -- its frame shows the source frame of the swap -- so there is no
+        // separate full-width "original" pane below any more.
+        //
+        // ONE card wraps the whole row so the tiles read as a single input group, with
+        // the same surface fill and hairline the section cards use. It is exactly as
+        // tall as the 72 dp tiles -- no breathing room top or bottom, the tiles now own
+        // the full card edge-to-edge (their own hairlines are gone too). The same 10 dp
+        // the row leaves between tiles is mirrored on the inside edges, so the group is
+        // framed.
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp)),
         ) {
-            FaceTile(
-                label = stringResource(R.string.swap_source_face),
-                bitmap = sourceThumb,
-                placeholder = stringResource(R.string.swap_source_pick),
-                modifier = Modifier.weight(1f),
-                onClick = if (idle) onPickSource else null,
-                actionIcon = if (hasSource) null else Icons.Default.Add,
+            Row(
+                Modifier.fillMaxWidth().fillMaxHeight(),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Shoot a face instead of finding one. Stills only: a source is an
-                // identity, and there is no video form of that.
-                if (idle) {
-                    IconButton(onCaptureSource, Modifier.size(26.dp)) {
-                        Icon(painterResource(R.drawable.ic_photo_camera),
-                             stringResource(R.string.swap_capture_source), Modifier.size(14.dp))
-                    }
-                }
-                // Removing the source is not destructive -- it drops a reference to a photo
-                // the user still has -- so unlike the output it does not confirm.
-                if (hasSource && idle) {
-                    IconButton(onClearSource, Modifier.size(26.dp)) {
-                        Icon(Icons.Default.Delete,
-                             stringResource(R.string.swap_remove_source),
-                             Modifier.size(14.dp))
-                    }
-                }
-            }
-            FaceTile(
-                // The tile names what it holds: TARGET while asking for one, ORIGINAL once
-                // it is showing the source frame. The timestamp is dropped here -- the
-                // tile's badge is a 9 sp plate, and a clock string does not survive that.
-                label = stringResource(if (hasTarget) R.string.swap_pane_original
-                                       else R.string.swap_pane_target),
-                bitmap = preview.original,
-                placeholder = stringResource(when {
-                    run.preparing -> R.string.swap_reading_video
-                    hasTarget -> R.string.swap_seeking
-                    else -> R.string.swap_add_target
-                }),
-                modifier = Modifier.weight(1f),
-                // The tile IS the picker. A separate full-width button said the same thing
-                // twice and cost a row of height the wordmark needed.
-                onClick = if (idle) onPickTarget else null,
-                actionIcon = if (hasTarget) null else Icons.Default.Add,
-            ) {
-                // CAMERA, beside the gallery pick, shown while the tile is EMPTY -- which
-                // is when someone deciding what to swap needs it. Two buttons because a
-                // still and a clip take different routes through the system camera, and
-                // one button that then asks which is a tap for a question the icons answer.
-                if (!hasTarget) {
-                    IconButton(onCapturePhoto, enabled = idle, modifier = Modifier.size(26.dp)) {
-                        Icon(painterResource(R.drawable.ic_photo_camera),
-                             stringResource(R.string.swap_capture_photo), Modifier.size(14.dp),
-                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    IconButton(onCaptureVideo, enabled = idle, modifier = Modifier.size(26.dp)) {
-                        Icon(painterResource(R.drawable.ic_videocam),
-                             stringResource(R.string.swap_capture_video), Modifier.size(14.dp),
-                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                if (hasTarget) {
-                    // Icons rather than the word "Change": two actions fit where one word
-                    // did, and the tile is already the picker, so the word was saying a
-                    // third time what the tap and the + icon already say.
-                    IconButton(onPickTarget, enabled = idle, modifier = Modifier.size(26.dp)) {
-                        Icon(Icons.Default.Add, stringResource(R.string.swap_choose_another_target),
-                             Modifier.size(14.dp),
-                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    IconButton(onClearTarget, enabled = idle, modifier = Modifier.size(26.dp)) {
-                        Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_target),
-                             Modifier.size(14.dp),
-                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
+                FaceTile(
+                    label = stringResource(R.string.swap_source_face),
+                    bitmap = sourceThumb,
+                    placeholder = stringResource(R.string.swap_source_pick),
+                    modifier = Modifier.weight(1f).edgeLine(
+                        end = true,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.31f),
+                    ),
+                    onClick = if (idle) onPickSource else null,
+                    actionIcon = if (hasSource) null else Icons.Default.Add,
+                    actions = {
+                        // Shoot a face instead of finding one. Stills only: a source is an
+                        // identity, and there is no video form of that.
+                        if (idle) {
+                            IconButton(onCaptureSource, Modifier.size(26.dp)) {
+                                Icon(painterResource(R.drawable.ic_photo_camera),
+                                     stringResource(R.string.swap_capture_source), Modifier.size(14.dp),
+                                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    },
+                    bottomActions = {
+                        // Removing the source is not destructive -- it drops a reference to a photo
+                        // the user still has -- so unlike the output it does not confirm.
+                        if (hasSource && idle) {
+                            IconButton(onClearSource, Modifier.size(26.dp)) {
+                                Icon(Icons.Default.Delete,
+                                     stringResource(R.string.swap_remove_source),
+                                     Modifier.size(14.dp),
+                                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    },
+                )
+                if (opts.lipSync) FaceTile(
+                    label = stringResource(R.string.swap_pane_voice),
+                    bitmap = null,
+                    placeholder = if (hasVoice) (voiceName ?: stringResource(R.string.swap_voice_picked))
+                                  else stringResource(R.string.swap_voice_add),
+                    modifier = Modifier.weight(1f),
+                    // The tile IS the picker, except while a clip is loaded or the mic is
+                    // live -- the record button owns the interaction then, and the whole-tile
+                    // tap must not fire mid-capture.
+                    onClick = if (idle && !hasVoice && !recordingVoice) onPickVoice else null,
+                    actionIcon = if (hasVoice) null else Icons.Default.Add,
+                    actions = {
+                        // RECORD. The lip syncer needs a voice that is not the target's own
+                        // audio, and the microphone is the one source every user has -- no file
+                        // to go find first.
+                        if (idle) {
+                            IconButton(onToggleRecordVoice, modifier = Modifier.size(26.dp)) {
+                                Icon(painterResource(if (recordingVoice) R.drawable.ic_stop
+                                                     else R.drawable.ic_mic),
+                                     stringResource(if (recordingVoice) R.string.swap_voice_stop
+                                                    else R.string.swap_voice_record),
+                                     Modifier.size(14.dp),
+                                     tint = if (recordingVoice) MaterialTheme.colorScheme.error
+                                            else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        if (hasVoice && idle) {
+                            IconButton(onPickVoice, modifier = Modifier.size(26.dp)) {
+                                Icon(Icons.Default.Add, stringResource(R.string.swap_choose_another_voice),
+                                     Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    },
+                    bottomActions = {
+                        if (hasVoice && idle) {
+                            IconButton(onClearVoice, modifier = Modifier.size(26.dp)) {
+                                Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_voice),
+                                     Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    },
+                )
+                FaceTile(
+                    // The tile names what it holds: TARGET while asking for one, ORIGINAL once
+                    // it is showing the source frame. The timestamp is dropped here -- the
+                    // tile's badge is a 9 sp plate, and a clock string does not survive that.
+                    label = stringResource(if (hasTarget) R.string.swap_pane_original
+                                           else R.string.swap_pane_target),
+                    bitmap = preview.original,
+                    placeholder = stringResource(when {
+                        run.preparing -> R.string.swap_reading_video
+                        hasTarget -> R.string.swap_seeking
+                        else -> R.string.swap_add_target
+                    }),
+                    modifier = Modifier.weight(1f).edgeLine(
+                        start = true,
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.31f),
+                    ),
+                    // The tile IS the picker. A separate full-width button said the same thing
+                    // twice and cost a row of height the wordmark needed.
+                    onClick = if (idle) onPickTarget else null,
+                    actionIcon = if (hasTarget) null else Icons.Default.Add,
+                    // The still camera keeps the top corner with the other tile actions; the
+                    // video camera goes back to the bottom-right corner it started in.
+                    actions = {
+                        if (!hasTarget) {
+                            // CAMERA, beside the gallery pick, shown while the tile is EMPTY -- which
+                            // is when someone deciding what to swap needs it. Two buttons because a
+                            // still and a clip take different routes through the system camera, and
+                            // one button that then asks which is a tap for a question the icons answer.
+                            IconButton(onCapturePhoto, enabled = idle, modifier = Modifier.size(26.dp)) {
+                                Icon(painterResource(R.drawable.ic_photo_camera),
+                                     stringResource(R.string.swap_capture_photo), Modifier.size(14.dp),
+                                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        if (hasTarget) {
+                            // Icons rather than the word "Change": two actions fit where one word
+                            // did, and the tile is already the picker, so the word was saying a
+                            // third time what the tap and the + icon already say.
+                            IconButton(onPickTarget, enabled = idle, modifier = Modifier.size(26.dp)) {
+                                Icon(Icons.Default.Add, stringResource(R.string.swap_choose_another_target),
+                                     Modifier.size(14.dp),
+                                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    },
+                    bottomActions = {
+                        // VIDEO CAMERA, back on its original seat in the bottom-right corner.
+                        if (!hasTarget) {
+                            IconButton(onCaptureVideo, enabled = idle, modifier = Modifier.size(26.dp)) {
+                                Icon(painterResource(R.drawable.ic_videocam),
+                                     stringResource(R.string.swap_capture_video), Modifier.size(14.dp),
+                                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        // TRASH, on the same bottom edge as the other tiles' delete.
+                        if (hasTarget) {
+                            IconButton(onClearTarget, enabled = idle, modifier = Modifier.size(26.dp)) {
+                                Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_target),
+                                     Modifier.size(14.dp),
+                                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    },
+                )
             }
         }
         // ---------------------------------------------------------------- previews
@@ -715,6 +775,11 @@ fun SwapScreen(
                 expanded = trimExpanded,
                 onToggle = { trimExpanded = !trimExpanded },
             ) {
+                val trimSliderColors = SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
+                    activeTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
+                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.69f),
+                )
                 RangeSlider(
                     value = trimStartMs..trimEndMs,
                     onValueChange = { r ->
@@ -728,6 +793,7 @@ fun SwapScreen(
                     },
                     valueRange = 0f..durationMs.toFloat(),
                     enabled = idle,
+                    colors = trimSliderColors,
                 )
                 // The REAL rate, not a hardcoded 30. The estimate was wrong on every
                 // clip that was not 30 fps, and it is the number the ETA is read against.
@@ -800,24 +866,16 @@ fun SwapScreen(
                     .fillMaxWidth()
                     .height(56.dp)
                     .clip(RoundedCornerShape(16.dp))
-                    // Background as a Modifier branch, not an if/else argument: each
-                    // outcome is a single Color (disabled uses a SOLID surfaceVariant fill,
-                    // not alpha on the accent -- alpha made a colour-under-grey smear that
-                    // read as broken, and it is what "the button shows as semi-transparent
-                    // grey until you touch it" was -- the preparing window during target
-                    // load). The enabled fill is the theme's monochrome primary.
-                    .then(
-                        when {
-                            busy -> Modifier.background(Color.Transparent)
-                            dimmed -> Modifier.background(
-                                MaterialTheme.colorScheme.surfaceVariant)
-                            else -> Modifier.background(
-                                MaterialTheme.colorScheme.primary)
-                        }
-                    )
+                    // The button's fill matches the other controls (surface, like the
+                    // SectionCards), not the page background. Its identity comes from the
+                    // border (outlineVariant) and the text weight, exactly like the
+                    // processor chips; only a running swap shows the error border. The
+                    // dimmed state keeps the same fill, just muted text.
+                    .background(MaterialTheme.colorScheme.surface)
                     .border(
-                        if (busy) 1.dp else 0.dp,
-                        MaterialTheme.colorScheme.error,
+                        1.dp,
+                        if (busy) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.outlineVariant,
                         RoundedCornerShape(16.dp),
                     )
                     .clickable(enabled = busy || canRun) {
@@ -835,10 +893,9 @@ fun SwapScreen(
                             stringResource(R.string.swap_action),
                             Modifier.size(22.dp),
                             // Dim the icon with the text when conditions are truly missing;
-                            // during preparing it stays the onPrimary contrast on the
-                            // primary button.
-                            tint = if (dimmed) MaterialTheme.colorScheme.onSurfaceVariant
-                                   else MaterialTheme.colorScheme.onPrimary,
+                            // otherwise it follows the label colour.
+                            tint = if (dimmed) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.69f)
+                                   else MaterialTheme.colorScheme.onBackground,
                         )
                     }
                     Text(
@@ -848,8 +905,9 @@ fun SwapScreen(
                         letterSpacing = 0.5.sp,
                         color = when {
                             busy -> MaterialTheme.colorScheme.error
-                            dimmed -> MaterialTheme.colorScheme.onSurfaceVariant
-                            else -> MaterialTheme.colorScheme.onPrimary
+                            // Not clickable: mute the label itself, 31 % lighter than normal.
+                            dimmed -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.69f)
+                            else -> MaterialTheme.colorScheme.onBackground
                         },
                     )
                 }
@@ -902,12 +960,30 @@ fun SwapScreen(
         if (hasOutput) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(onSave, enabled = idle, modifier = Modifier.weight(1f),
-                       shape = RoundedCornerShape(14.dp)) {
+                       shape = RoundedCornerShape(14.dp),
+                       colors = ButtonDefaults.buttonColors(
+                           containerColor = MaterialTheme.colorScheme.surface,
+                           contentColor = MaterialTheme.colorScheme.onBackground,
+                           disabledContainerColor = MaterialTheme.colorScheme.surface,
+                           disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                       ),
+                       border = BorderStroke(1.dp,
+                                             MaterialTheme.colorScheme.outlineVariant)) {
                     Text(stringResource(if (saved) R.string.swap_saved_to_gallery
                                         else R.string.swap_save_to_gallery))
                 }
                 OutlinedButton(onShare, enabled = idle,
-                               shape = RoundedCornerShape(14.dp)) {
+                               shape = RoundedCornerShape(14.dp),
+                               // Same control background as the Save button next to it:
+                               // card-surface in both schemes, not the default accent.
+                               colors = ButtonDefaults.outlinedButtonColors(
+                                   containerColor = MaterialTheme.colorScheme.surface,
+                                   contentColor = MaterialTheme.colorScheme.onBackground,
+                                   disabledContainerColor = MaterialTheme.colorScheme.surface,
+                                   disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                               ),
+                               border = BorderStroke(1.dp,
+                                                     MaterialTheme.colorScheme.outlineVariant)) {
                         Text(stringResource(R.string.swap_share))
                     }
                 // Deleting a render IS destructive -- minutes of NPU time, and the file is
@@ -925,7 +1001,16 @@ fun SwapScreen(
                 // result is to remove the target, which has its own button on its own pane.
                 if (outputFile != null) {
                     OutlinedButton({ confirmDeleteOutput = true }, enabled = idle,
-                                   shape = RoundedCornerShape(14.dp)) {
+                                   shape = RoundedCornerShape(14.dp),
+                                   // Same control background as the buttons around it.
+                                   colors = ButtonDefaults.outlinedButtonColors(
+                                       containerColor = MaterialTheme.colorScheme.surface,
+                                       contentColor = MaterialTheme.colorScheme.onBackground,
+                                       disabledContainerColor = MaterialTheme.colorScheme.surface,
+                                       disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                   ),
+                                   border = BorderStroke(1.dp,
+                                                         MaterialTheme.colorScheme.outlineVariant)) {
                         Icon(Icons.Default.Delete, stringResource(R.string.out_delete),
                              Modifier.size(18.dp))
                     }
@@ -1112,5 +1197,26 @@ fun DownloadOverlay(onDownload: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+/**
+ * A single hairline on one edge of a tile — the divider that separates a tile from its
+ * neighbour without drawing a full box around it. Drawn over the tile's content so it
+ * survives the tile's own surface fill.
+ */
+private fun Modifier.edgeLine(
+    start: Boolean = false,
+    end: Boolean = false,
+    color: Color,
+    stroke: Dp = 1.dp,
+): Modifier = drawWithContent {
+    drawContent()
+    val w = stroke.toPx()
+    if (start) {
+        drawLine(color, Offset(w / 2f, 0f), Offset(w / 2f, size.height), w)
+    }
+    if (end) {
+        drawLine(color, Offset(size.width - w / 2f, 0f), Offset(size.width - w / 2f, size.height), w)
     }
 }

@@ -463,7 +463,7 @@ fun PreviewPane(
  * the panes competed with the stage chips for what a fresh install sees. A tile keeps both
  * inputs permanently on screen: 72 dp tall whatever the state, width wrapping to whatever
  * the row gives it, the label as a translucent plate ON the picture so the whole height is
- * image, and the pick/remove actions tucked into the bottom corner.
+ * image, and the pick/remove actions tucked into the top corner.
  */
 @Composable
 fun FaceTile(
@@ -475,15 +475,16 @@ fun FaceTile(
     onClick: (() -> Unit)? = null,
     /** Shown large and centred while [bitmap] is null, as the tile's call to action. */
     actionIcon: ImageVector? = null,
-    /** Small actions (camera, change, delete…) over the tile's bottom-right corner. */
+    /** Small actions (camera, change, delete…) over the tile's top-right corner. */
     actions: @Composable () -> Unit = {},
+    /** Actions that keep the original bottom-right corner (the video camera). */
+    bottomActions: @Composable () -> Unit = {},
 ) {
     Box(
         modifier
             .height(72.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(MaterialTheme.colorScheme.surface)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(16.dp))
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
         contentAlignment = Alignment.Center,
     ) {
@@ -530,15 +531,20 @@ fun FaceTile(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(5.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
+                // The label sits directly on the image with no plate behind it.
                 .padding(horizontal = 6.dp, vertical = 2.dp),
         )
+        Row(
+            Modifier.align(Alignment.TopEnd).padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            actions()
+        }
         Row(
             Modifier.align(Alignment.BottomEnd).padding(4.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            actions()
+            bottomActions()
         }
     }
 }
@@ -631,6 +637,14 @@ fun OutputPane(
                 enabled = enabled,
             ) { Text(stringResource(if (playing) R.string.out_pause else R.string.out_play)) }
 
+            // The slider reads too dark / high-contrast against the theme, so every part
+            // (thumb, active and inactive track) has its opacity cut by 31%: 69% alpha
+            // keeps the exact same hue with a much softer contrast.
+            val slimColors = SliderDefaults.colors(
+                thumbColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
+                activeTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
+                inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.69f),
+            )
             Slider(
                 value = positionMs.toFloat().coerceIn(0f, durationMs.toFloat()),
                 onValueChange = {
@@ -640,6 +654,7 @@ fun OutputPane(
                 valueRange = 0f..durationMs.coerceAtLeast(1).toFloat(),
                 enabled = enabled && durationMs > 0,
                 modifier = Modifier.weight(1f),
+                colors = slimColors,
             )
             Text(
                 "%d.%02ds".format(positionMs / 1000, (positionMs % 1000) / 10),

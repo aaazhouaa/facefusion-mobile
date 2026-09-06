@@ -12,8 +12,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import com.facefusion.mobile.R
 
 enum class Screen { Swap, Live, Settings }
@@ -60,8 +62,16 @@ fun AppScaffold(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        AppMark()
-                        Wordmark(Modifier.weight(1f))
+                        // In dark mode the brand band is 31% fainter -- the mark and the
+                        // wordmark read as chrome rather than content, and the header
+                        // should not out-shout the tiles under it on a dark theme.
+                        val brandAlpha =
+                            if (MaterialTheme.colorScheme.background.luminance() < 0.5f) 0.69f else 1f
+                        AppMark(modifier = Modifier.alpha(brandAlpha))
+                        Wordmark(
+                            Modifier.weight(1f),
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = brandAlpha),
+                        )
                     }
                     HorizontalDivider(
                         thickness = 1.dp,

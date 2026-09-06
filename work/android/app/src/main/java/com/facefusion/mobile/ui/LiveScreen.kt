@@ -2,6 +2,7 @@ package com.facefusion.mobile.ui
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -188,6 +189,13 @@ fun LiveScreen(
             onClick = onToggleRun,
             enabled = modelsReady && sourceThumb != null,
             modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+                contentColor = MaterialTheme.colorScheme.onBackground,
+                disabledContainerColor = MaterialTheme.colorScheme.surface,
+                disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         ) { Text(stringResource(if (running) R.string.live_stop else R.string.live_start)) }
 
         // ---------------------------------------------------------------- fast mode
