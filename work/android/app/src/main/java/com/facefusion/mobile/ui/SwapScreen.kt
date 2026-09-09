@@ -979,14 +979,18 @@ fun SwapScreen(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // "+" 添加按钮，64dp，始终最左侧
-                    if (hasTarget && !imageTarget && idle) {
-                        IconButton(onAddToBatch,
-                                   modifier = Modifier
-                                       .size(64.dp)
-                                       .clip(RoundedCornerShape(8.dp))
-                                       .background(MaterialTheme.colorScheme.surfaceVariant),
-                                   ) {
+                    // "+" 添加按钮，64dp，始终最左侧。
+                    // 常驻：只在运行/处理中禁点，不从组合里移除——挖走按钮会让
+                    // "加一个片段"在每次跑批期间变成一个不存在的东西。
+                    if (hasTarget && !imageTarget) {
+                        IconButton(
+                            onAddToBatch,
+                            enabled = idle,
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                        ) {
                             Icon(Icons.Default.Add, stringResource(R.string.swap_batch_add),
                                  Modifier.size(28.dp),
                                  tint = MaterialTheme.colorScheme.onSurfaceVariant)

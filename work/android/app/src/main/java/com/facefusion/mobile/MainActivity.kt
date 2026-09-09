@@ -153,6 +153,16 @@ class MainActivity : ComponentActivity() {
      * pane says so.
      */
     private var outputPartial by mutableStateOf(false)
+
+    /**
+     * The SINGLE-clip run auto-saved its own output on completion.
+     *
+     * Kept separately from the queue: `outputAutoSaved` on the screen is a batch notion
+     * (a queue row pointing at the file), and a one-video run never has rows -- without
+     * this flag the finished clip showed a manual Save button and a second tap in the
+     * gallery produced a duplicate. Reset wherever `outputFile` is.
+     */
+    private var singleAutoSaved by mutableStateOf(false)
     private var savedUri by mutableStateOf<Uri?>(null)
 
     /**
@@ -1210,10 +1220,13 @@ class MainActivity : ComponentActivity() {
                                 // Already in the gallery, so there is nothing to offer.
                                 // Auto-save writes each clip as it finishes; a Save button
                                 // beside a clip that is already saved is a second copy and
-                                // a question the user has answered once already.
+                                // a question the user has answered once already. A queue of
+                                // one never enters the batch loop, so its save is tracked
+                                // separately (singleAutoSaved) -- same badge, same promise.
                                 outputAutoSaved = opts.batchAutoSave &&
                                     outputFile != null &&
-                                    batchQueue.any { it.output == outputFile },
+                                    (singleAutoSaved ||
+                                     batchQueue.any { it.output == outputFile }),
                                 onBatchAutoSave = { on ->
                                     // A gallery preference -- nothing the pipeline reads.
                                     // applyOpts() nulls the preview and the result and redraws
@@ -2583,6 +2596,7 @@ class MainActivity : ComponentActivity() {
         val gone = outputFile
         gone?.delete()
         outputFile = null; outputPartial = false; savedUri = null; savedPathLabel = null
+        singleAutoSaved = false
         // ⚠ A QUEUE ROW MAY BE POINTING AT WHAT WAS JUST DELETED. The row is the only way
         // back to a batch clip, so leaving it Done with a dead File means a thumbnail that
         // opens a black pane and a Save that writes nothing. The clip goes back to being
@@ -2737,16 +2751,23 @@ class MainActivity : ComponentActivity() {
         val item = batchQueue.getOrNull(i) ?: return
         confirmBatchDelete = null
 
-        item.output?.let { f ->
+        // ⚠ The render is dropped in BOTH branches. This used to run only on the
+        // multi-row path: deleting the last visible clip of a one-row queue fell into
+        // clearTarget(), which forgets the pane but not the queue, and the row's output
+        // survived in batchQueue with its file already gone -- the next redraw built
+        // doneIx from that dangling output and the result pane came back showing a
+        // thumbnail of a clip that had been deleted.
+        val out = item.output
+        if (out != null) {
             // Step the pane off it first: the player holds the file, and a pane pointing at
             // a deleted path shows a black rectangle with no way back.
-            if (outputFile == f) { outputFile = null; savedUri = null; savedPathLabel = null }
-            runCatching { f.delete() }
+            if (outputFile == out) { outputFile = null; savedUri = null; savedPathLabel = null }
+            runCatching { out.delete() }
         }
 
         if (i == 0) {
             val rest = batchQueue.drop(1)
-            if (rest.isEmpty()) { clearTarget(); return }
+            if (rest.isEmpty()) { batchQueue = emptyList(); clearTarget(); return }
             // ⚠ Order matters: loadTarget does NOT touch batchQueue (only clearTarget does),
             // so the shortened queue set here survives the load that follows it.
             batchQueue = rest
@@ -3272,6 +3293,13 @@ class MainActivity : ComponentActivity() {
                 // The run kept whatever it had when Cancel was pressed, so say which it is.
                 outputPartial = cancelRequested
                 status = getString(R.string.status_done, it.length() / 1024)
+                // ⚠ SINGLE-CLIP AUTO-SAVE. `batchAutoSave` used to be read only by the
+                // batch loop -- a queue of one routes through HERE, so the same checkbox
+                // did nothing for a run that is not part of a queue. Save as it lands,
+                // same as the batch: an unattended run should not need a third tap after
+                // the progress bar. The toggle's name still says batch; it now means
+                // "save finished clips automatically", wherever they come from.
+                if (opts.batchAutoSave) { singleAutoSaved = true; saveToGallery(it) }
                 // ⚠ RE-WARM THE PREVIEW. `runSwap` opens with invalidatePreview(), which
                 // clears previewWarm -- and `onTrimChanged` only redraws the swapped pane
                 // `if (previewWarm)`, on the reasoning that the first model load costs
