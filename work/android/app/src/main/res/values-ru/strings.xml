@@ -359,6 +359,7 @@
     <string name="live_rec_start">Запись</string>
     <string name="live_rec_stop">Остановить запись</string>
     <string name="live_rec_badge">ЗАП</string>
+    <string name="live_settings">Настройки</string>
     <string name="live_mic">Микрофон</string>
     <string name="live_mic_on">Записывать звук с микрофона. Измените до начала записи.</string>
     <string name="live_mic_off">Только видео. Микрофон выключен.</string>

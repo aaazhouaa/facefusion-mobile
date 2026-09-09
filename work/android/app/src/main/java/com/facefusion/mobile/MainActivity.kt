@@ -16,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
 import com.facefusion.mobile.ui.*
@@ -439,10 +440,6 @@ class MainActivity : ComponentActivity() {
     private fun setSourceFrom(uri: Uri) {
         sourceUri = uri
         sourceThumb = decodeOriented(uri)
-        sourceThumb?.let { thumb ->
-            if (liveSources.none { it.uri == uri }) liveSources = liveSources + LiveSource(uri, thumb)
-            liveSourceIndex = liveSources.indexOfFirst { it.uri == uri }.coerceAtLeast(0)
-        }
         // A different face means the loaded pipeline is holding the wrong embedding.
         previewOptionsChanged()
     }
@@ -488,10 +485,38 @@ class MainActivity : ComponentActivity() {
         liveSourceIndex = liveSourceIndex.coerceAtMost(liveSources.lastIndex.coerceAtLeast(0))
     }
 
+    /**
+     * Delete one slot BY INDEX -- the Live fold's per-row delete, not the active slot.
+     * Removing the active one re-points the index to the neighbour, the same clamp
+     * [clearLiveSource] does; the native side keeps the last set index, so a live switch
+     * has to follow the removal while running.
+     */
+    private fun deleteLiveSource(index: Int) {
+        if (index !in liveSources.indices || liveRunning) return
+        liveSources = liveSources.filterIndexed { i, _ -> i != index }
+        liveSourceIndex = when {
+            liveSources.isEmpty() -> 0
+            index < liveSourceIndex -> liveSourceIndex - 1
+            else -> liveSourceIndex.coerceAtMost(liveSources.lastIndex)
+        }
+        if (liveRunning) NativePipe.setActiveSource(liveSourceIndex)
+    }
+
     private val takeSourcePhoto = registerForActivityResult(
         ActivityResultContracts.TakePicture()) { ok ->
         val uri = pendingCapture; pendingCapture = null
         if (ok && uri != null) setSourceFrom(uri)
+    }
+
+    /**
+     * The LIVE tab's own camera capture: lands in [addLiveSource], never in the Swap
+     * screen's source. Decoupled on purpose -- the two tabs keep separate source stores,
+     * so shooting a source on Live cannot rewrite what a Swap run is set up with.
+     */
+    private val takeLiveSourcePhoto = registerForActivityResult(
+        ActivityResultContracts.TakePicture()) { ok ->
+        val uri = pendingCapture; pendingCapture = null
+        if (ok && uri != null) addLiveSource(uri)
     }
     /**
      * Where the system camera is writing, between launching it and its result arriving.
@@ -530,11 +555,13 @@ class MainActivity : ComponentActivity() {
      * start, or the intent fails. An app that never declared it would need no such thing,
      * which is why this looks unnecessary and is not.
      */
-    private fun capture(video: Boolean, forSource: Boolean = false) {
+    private fun capture(video: Boolean, forSource: Boolean = false,
+                        liveForSource: Boolean = false) {
         if (checkSelfPermission(android.Manifest.permission.CAMERA) !=
             android.content.pm.PackageManager.PERMISSION_GRANTED) {
             pendingCaptureIsVideo = video
             pendingCaptureForSource = forSource
+            pendingCaptureLiveForSource = liveForSource
             askCameraForCapture.launch(android.Manifest.permission.CAMERA)
             return
         }
@@ -543,7 +570,10 @@ class MainActivity : ComponentActivity() {
         when {
             // A source face is an identity, so there is no video form of it -- the source
             // capture is stills only, and forSource is never combined with video.
+            // liveForSource routes to the LIVE tab's own contract: the two tabs' source
+            // stores are decoupled, and a Live capture must not touch the Swap source.
             forSource -> takeSourcePhoto.launch(uri)
+            liveForSource -> takeLiveSourcePhoto.launch(uri)
             video -> recordVideo.launch(uri)
             else -> takePhoto.launch(uri)
         }
@@ -551,9 +581,11 @@ class MainActivity : ComponentActivity() {
 
     private var pendingCaptureIsVideo = false
     private var pendingCaptureForSource = false
+    private var pendingCaptureLiveForSource = false
     private val askCameraForCapture = registerForActivityResult(
         ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) capture(pendingCaptureIsVideo, pendingCaptureForSource)
+        if (granted) capture(pendingCaptureIsVideo, pendingCaptureForSource,
+                             pendingCaptureLiveForSource)
         else status = getString(R.string.status_camera_denied)
     }
 
@@ -1036,6 +1068,11 @@ class MainActivity : ComponentActivity() {
                         refreshSwapped(force = true)
                     }
                 }
+                // Per-tab saveable state. The screens keep fold states and the
+                // like in rememberSaveable; without a provider those values die
+                // with the tab's composition on every switch, so a collapsed
+                // "Source face" card re-expanded the moment you came back.
+                val tabState = rememberSaveableStateHolder()
                 AppScaffold(
                     screen,
                     {
@@ -1053,7 +1090,8 @@ class MainActivity : ComponentActivity() {
                 ) { pad ->
                     Box(Modifier.padding(pad)) {
                         when (screen) {
-                            Screen.Swap -> SwapScreen(
+                            Screen.Swap -> tabState.SaveableStateProvider(Screen.Swap.name) {
+                                SwapScreen(
                                 sourceThumb = sourceThumb,
                                 hasSource = sourceUri != null,
                                 hasTarget = targetFile != null || targetImage != null,
@@ -1210,15 +1248,18 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onShare = { shareResult() },
                             )
+                            }
 
-                            Screen.Live -> LiveScreen(
+                            Screen.Live -> tabState.SaveableStateProvider(Screen.Live.name) {
+                                LiveScreen(
                                 sourceThumb = liveSources.getOrNull(liveSourceIndex)?.thumb,
+                                sourceThumbs = liveSources.map { it.thumb },
                                 sourceCount = liveSources.size,
                                 activeSource = liveSourceIndex,
                                 onSelectSource = ::selectLiveSource,
+                                onDeleteSource = ::deleteLiveSource,
                                 onPickSource = ::pickLiveSource,
-                                onClearSource = ::clearLiveSource,
-                                onCaptureSource = { capture(video = false, forSource = true) },
+                                onCaptureSource = { capture(video = false, liveForSource = true) },
                                 frame = liveFrame,
                                 running = liveRunning,
                                 onToggleRun = { toggleLive() },
@@ -1252,8 +1293,10 @@ class MainActivity : ComponentActivity() {
                                 onClearAssignments = ::clearLiveAssignments,
                                 onToggleRecord = ::toggleLiveRecording,
                             )
+                            }
 
-                            Screen.Settings -> SettingsScreen(
+                            Screen.Settings -> tabState.SaveableStateProvider(Screen.Settings.name) {
+                                SettingsScreen(
                                 sections = modelSections(),
                                 modelDirPath = modelDir().absolutePath,
                                 device = deviceUi,
@@ -1290,6 +1333,7 @@ class MainActivity : ComponentActivity() {
                                     ThemePrefs.save(this@MainActivity, dark)
                                 },
                             )
+                            }
                         }
                     }
 

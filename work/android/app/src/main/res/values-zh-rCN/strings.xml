@@ -376,6 +376,7 @@
     <string name="live_rec_start">录制</string>
     <string name="live_rec_stop">停止录制</string>
     <string name="live_rec_badge">录制</string>
+    <string name="live_settings">设置</string>
     <string name="live_mic">麦克风</string>
     <string name="live_mic_on">录制麦克风音频，需在开始录制前设置。</string>
     <string name="live_mic_off">仅视频，麦克风已关闭。</string>

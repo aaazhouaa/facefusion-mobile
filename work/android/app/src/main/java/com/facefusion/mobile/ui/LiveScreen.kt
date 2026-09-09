@@ -5,7 +5,10 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -13,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -49,11 +53,14 @@ import kotlinx.coroutines.delay
 @Composable
 fun LiveScreen(
     sourceThumb: Bitmap?,
+    /** The loaded live sources, thumbnail first -- one row each inside the fold. */
+    sourceThumbs: List<Bitmap?> = emptyList(),
     sourceCount: Int = 0,
     activeSource: Int = 0,
     onSelectSource: (Int) -> Unit = {},
+    /** Delete the source at [index] -- per-slot, not just the active one. */
+    onDeleteSource: (Int) -> Unit = {},
     onPickSource: () -> Unit,
-    onClearSource: () -> Unit,
     onCaptureSource: () -> Unit,
     frame: Bitmap?,
     running: Boolean,
@@ -118,63 +125,122 @@ fun LiveScreen(
 
         // ---------------------------------------------------------------- source
         //
-        // Above the feed, and the same pane the Swap screen uses: full width always, and
-        // collapsed in HEIGHT once filled -- the source is one face that never changes
-        // during a run, so the pane it fills need not be tall. Not narrow, though: the
-        // caption row has to hold "SOURCE FACE" beside a camera and a delete button.
+        // ONE fold for both states: empty or filled it is the same collapsible card, so
+        // the layout never jumps when the first source lands. Its children run LEFT TO
+        // RIGHT in one horizontal row -- the pick button pinned FIRST, then every loaded
+        // source as a 72 x 72 dp tile of what that slot is bound to, its "Source N" tag
+        // riding the tile and a delete in the tile's top-right corner. The camera stays
+        // an icon, beside the caption in the title row.
         //
-        // ⚠ Not tappable while running. setSource re-detects and re-embeds, and doing that
-        // under the pump would change identity halfway through a frame the camera is still
-        // filling.
-        val sourceBox = 104.dp
-        Box(Modifier.fillMaxWidth()) {
-            PreviewPane(
-                label = stringResource(R.string.swap_source_face),
-                height = if (sourceThumb != null) sourceBox else 220.dp,
-                bitmap = sourceThumb,
-                placeholder = stringResource(R.string.swap_source_pick),
-                onClick = if (!running) onPickSource else null,
-                actionIcon = if (sourceThumb != null) null else Icons.Default.Add,
-                zoom = null,
-            ) {
+        // ⚠ Not tappable while running. Adding or re-embedding under the pump would
+        // change identity halfway through a frame the camera is still filling.
+        var sourcesOpen by rememberSaveable { mutableStateOf(true) }
+        SectionCard(
+            title = stringResource(R.string.swap_source_face),
+            collapsible = true,
+            expanded = sourcesOpen,
+            onToggle = { sourcesOpen = !sourcesOpen },
+            trailing = {
                 if (!running) {
-                    IconButton(onCaptureSource, Modifier.size(28.dp)) {
+                    // 20 dp, the SAME height as the fold chevron beside it: both caption
+                    // rows measure identically, so a collapsed "Source face" and a
+                    // collapsed "Settings" band are the same height.
+                    IconButton(onCaptureSource, Modifier.size(20.dp)) {
                         Icon(painterResource(R.drawable.ic_photo_camera),
-                             stringResource(R.string.swap_capture_source), Modifier.size(16.dp))
+                             stringResource(R.string.swap_capture_source), Modifier.size(14.dp))
                     }
                 }
-                if (sourceThumb != null && !running) {
-                    IconButton(onClearSource, Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Delete,
-                             stringResource(R.string.swap_remove_source),
-                             Modifier.size(16.dp))
+            },
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // THE HORIZONTAL RUN: pick tile first, source tiles after. Scrolls
+                // sideways when the faces outrun the width, so nothing gets squeezed.
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // The pick tile: a 72 x 72 dp square with a bare "+", bordered like
+                    // every source tile beside it. It REPLACED the old pick button and
+                    // the empty-state face placeholder -- one "+ where faces go" says
+                    // both things at once.
+                    Box(
+                        Modifier
+                            .size(72.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant,
+                                    RoundedCornerShape(12.dp))
+                            .clickable(enabled = !running) { onPickSource() },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            Icons.Default.Add, null, Modifier.size(24.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    repeat(sourceCount) { index ->
+                        val selected = index == activeSource
+                        // The slot's bound content: a full-bleed 72 x 72 dp tile, bordered
+                        // like the pick tile; the selected one carries the accent border.
+                        Box(
+                            Modifier
+                                .size(72.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(
+                                    if (selected) 2.dp else 1.dp,
+                                    if (selected) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.outlineVariant,
+                                    RoundedCornerShape(12.dp),
+                                )
+                                .clickable(enabled = !finalizing) { onSelectSource(index) },
+                        ) {
+                                val thumb = sourceThumbs.getOrNull(index)
+                                if (thumb != null) {
+                                    Image(
+                                        thumb.asImageBitmap(),
+                                        contentDescription =
+                                            stringResource(R.string.live_source_label, index + 1),
+                                        Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop,
+                                    )
+                                } else {
+                                    Box(
+                                        Modifier.fillMaxSize()
+                                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(Icons.Default.Face, null, Modifier.size(24.dp),
+                                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                                // Delete THIS slot, top-right over its own thumbnail.
+                                if (!running) {
+                                    Box(
+                                        Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(3.dp)
+                                            .size(20.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(Color.Black.copy(alpha = 0.55f))
+                                            .clickable { onDeleteSource(index) },
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            stringResource(R.string.swap_remove_source),
+                                            Modifier.size(13.dp),
+                                            tint = Color.White,
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
-        }
-        Text(
-            if (running) stringResource(R.string.live_stop_to_change)
-            else stringResource(R.string.live_source_hint),
-            style = MaterialTheme.typography.bodySmall, fontSize = 11.sp,
-        )
-
-        if (sourceCount > 0) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.fillMaxWidth()) {
-                repeat(sourceCount) { index ->
-                    FilterChip(
-                        selected = index == activeSource,
-                        onClick = { onSelectSource(index) },
-                        label = { Text(stringResource(R.string.live_source_label, index + 1)) },
-                        // The whole point of the multi-source mode: switch ON THE FLY,
-                        // including while a recording is in flight -- the native side
-                        // reads the active slot per frame, so the file simply changes
-                        // face at the switch. Only finalization is locked.
-                        enabled = !finalizing,
-                    )
-                }
-            }
-        }
 
         // ---------------------------------------------------------------- the feed
         //
@@ -430,153 +496,169 @@ fun LiveScreen(
             }
         }
 
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.live_mic), style = MaterialTheme.typography.bodyMedium)
-                Text(stringResource(if (microphone) R.string.live_mic_on else R.string.live_mic_off),
-                     style = MaterialTheme.typography.bodySmall)
-            }
-            Switch(checked = microphone, onCheckedChange = onMicrophoneChange,
-                   enabled = !recording && !finalizing)
-        }
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.live_swap), style = MaterialTheme.typography.bodyMedium)
-                Text(if (swapEnabled) stringResource(R.string.live_swap_on)
-                     else stringResource(R.string.live_swap_off),
-                     style = MaterialTheme.typography.bodySmall)
-            }
-            Switch(checked = swapEnabled,
-                   onCheckedChange = { onToggleSwapEnabled() },
-                   // Also while recording: disabling the swap mid-file is the other half
-                   // of the on-the-fly mode, and the recorded feed simply keeps the
-                   // unswapped frames for as long as it is off.
-                   enabled = !finalizing)
-        }
-
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.live_target), style = MaterialTheme.typography.bodyMedium)
-                // Mutually exclusive with assign per person (both choose which face gets
-                // which source). While assign is on the selector is pinned to "all
-                // faces", so the switch is locked and says so.
-                Text(stringResource(
-                    if (assignMode) R.string.live_target_locked
-                    else if (largestOnly) R.string.live_target_one
-                    else R.string.live_target_all),
-                     style = MaterialTheme.typography.bodySmall)
-            }
-            Switch(checked = !largestOnly,
-                   onCheckedChange = { onLargestOnlyChange(!it) },
-                   enabled = !assignMode && !recording && !finalizing)
-        }
-
-        // How assign mode works: select the source FIRST, then tap the person -- the
-        // order the tap captures. A help dialog is the one place the flow can be stated
-        // without cluttering the row; it is available whether or not the mode is on.
-        var showAssignHelp by rememberSaveable { mutableStateOf(false) }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.live_assign_title),
-                     style = MaterialTheme.typography.bodyMedium)
-                Text(stringResource(if (assignMode) R.string.live_assign_on
-                                    else R.string.live_assign_off),
-                     style = MaterialTheme.typography.bodySmall, fontSize = 11.sp)
-            }
-            IconButton(
-                onClick = { showAssignHelp = true },
-                modifier = Modifier.size(32.dp),
-            ) {
-                Icon(
-                    Icons.Filled.Info,
-                    contentDescription = stringResource(R.string.live_assign_help),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-            // Clear lives with the switch: turning the mode off means default behaviour
-            // (each face takes the selected source) for the whole session, so the
-            // assignments are only meaningful -- and only shown -- while it is on.
-            if (assignMode && assignCount > 0) {
-                TextButton(onClick = onClearAssignments) {
-                    Text(stringResource(R.string.live_assign_clear))
-                }
-            }
-            Switch(checked = assignMode,
-                   onCheckedChange = { onToggleAssignMode() },
-                   // A face must be selectable before it can be assigned, so the mode
-                   // cannot be turned on mid-recording either -- the chips are locked
-                   // for the same reason.
-                   enabled = running && !recording && !finalizing && sourceCount > 0)
-        }
-        if (showAssignHelp) {
-            AlertDialog(
-                onDismissRequest = { showAssignHelp = false },
-                icon = { Icon(Icons.Filled.Info, contentDescription = null) },
-                title = { Text(stringResource(R.string.live_assign_help_title)) },
-                text = { Text(stringResource(R.string.live_assign_help_body)) },
-                confirmButton = {
-                    TextButton(onClick = { showAssignHelp = false }) {
-                        Text(stringResource(R.string.live_assign_help_gotit))
-                    }
-                },
-            )
-        }
-
-        // ---------------------------------------------------------------- fast mode
+        // ---------------------------------------------------------------- settings
         //
-        // The SAME switch as before, stated the way round it is actually used. It used to
-        // read "Use my Swap settings", off by default -- so the recommended configuration
-        // was the negative of an option, and the thing being turned off had no name. Now
-        // the preset has the name, it is on by default, and the experimental path is the
-        // one that asks before it is taken.
-        var confirmSlow by rememberSaveable { mutableStateOf(false) }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.live_fast_mode),
-                     style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    stringResource(if (useMySettings) R.string.live_fast_off
-                                   else R.string.live_fast_on),
-                    style = MaterialTheme.typography.bodySmall, fontSize = 11.sp,
-                )
+        // Everything that tunes the run -- microphone, the swap switch, which face is
+        // targeted, assign-per-person, fast mode -- lives under ONE collapsible card
+        // labelled "Settings", below Start. The page above the fold stays two rows: the
+        // source run and the Start/Record pair.
+        var settingsOpen by rememberSaveable { mutableStateOf(false) }
+        SectionCard(
+            title = stringResource(R.string.live_settings),
+            collapsible = true,
+            expanded = settingsOpen,
+            onToggle = { settingsOpen = !settingsOpen },
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.live_mic), style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(if (microphone) R.string.live_mic_on else R.string.live_mic_off),
+                             style = MaterialTheme.typography.bodySmall)
+                    }
+                    Switch(checked = microphone, onCheckedChange = onMicrophoneChange,
+                           enabled = !recording && !finalizing)
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.live_swap), style = MaterialTheme.typography.bodyMedium)
+                        Text(if (swapEnabled) stringResource(R.string.live_swap_on)
+                             else stringResource(R.string.live_swap_off),
+                             style = MaterialTheme.typography.bodySmall)
+                    }
+                    Switch(checked = swapEnabled,
+                           onCheckedChange = { onToggleSwapEnabled() },
+                           // Also while recording: disabling the swap mid-file is the other half
+                           // of the on-the-fly mode, and the recorded feed simply keeps the
+                           // unswapped frames for as long as it is off.
+                           enabled = !finalizing)
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.live_target), style = MaterialTheme.typography.bodyMedium)
+                        // Mutually exclusive with assign per person (both choose which face gets
+                        // which source). While assign is on the selector is pinned to "all
+                        // faces", so the switch is locked and says so.
+                        Text(stringResource(
+                            if (assignMode) R.string.live_target_locked
+                            else if (largestOnly) R.string.live_target_one
+                            else R.string.live_target_all),
+                             style = MaterialTheme.typography.bodySmall)
+                    }
+                    Switch(checked = !largestOnly,
+                           onCheckedChange = { onLargestOnlyChange(!it) },
+                           enabled = !assignMode && !recording && !finalizing)
+                }
+
+                // How assign mode works: select the source FIRST, then tap the person -- the
+                // order the tap captures. A help dialog is the one place the flow can be stated
+                // without cluttering the row; it is available whether or not the mode is on.
+                var showAssignHelp by rememberSaveable { mutableStateOf(false) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.live_assign_title),
+                             style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(if (assignMode) R.string.live_assign_on
+                                            else R.string.live_assign_off),
+                             style = MaterialTheme.typography.bodySmall, fontSize = 11.sp)
+                    }
+                    IconButton(
+                        onClick = { showAssignHelp = true },
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Info,
+                            contentDescription = stringResource(R.string.live_assign_help),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    // Clear lives with the switch: turning the mode off means default behaviour
+                    // (each face takes the selected source) for the whole session, so the
+                    // assignments are only meaningful -- and only shown -- while it is on.
+                    if (assignMode && assignCount > 0) {
+                        TextButton(onClick = onClearAssignments) {
+                            Text(stringResource(R.string.live_assign_clear))
+                        }
+                    }
+                    Switch(checked = assignMode,
+                           onCheckedChange = { onToggleAssignMode() },
+                           // A face must be selectable before it can be assigned, so the mode
+                           // cannot be turned on mid-recording either -- the chips are locked
+                           // for the same reason.
+                           enabled = running && !recording && !finalizing && sourceCount > 0)
+                }
+                if (showAssignHelp) {
+                    AlertDialog(
+                        onDismissRequest = { showAssignHelp = false },
+                        icon = { Icon(Icons.Filled.Info, contentDescription = null) },
+                        title = { Text(stringResource(R.string.live_assign_help_title)) },
+                        text = { Text(stringResource(R.string.live_assign_help_body)) },
+                        confirmButton = {
+                            TextButton(onClick = { showAssignHelp = false }) {
+                                Text(stringResource(R.string.live_assign_help_gotit))
+                            }
+                        },
+                    )
+                }
+
+                // ---------------------------------------------------------------- fast mode
+                //
+                // The SAME switch as before, stated the way round it is actually used. It used to
+                // read "Use my Swap settings", off by default -- so the recommended configuration
+                // was the negative of an option, and the thing being turned off had no name. Now
+                // the preset has the name, it is on by default, and the experimental path is the
+                // one that asks before it is taken.
+                var confirmSlow by rememberSaveable { mutableStateOf(false) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.live_fast_mode),
+                             style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            stringResource(if (useMySettings) R.string.live_fast_off
+                                           else R.string.live_fast_on),
+                            style = MaterialTheme.typography.bodySmall, fontSize = 11.sp,
+                        )
+                    }
+                    Switch(
+                        // Inverted: fast mode ON is useMySettings OFF.
+                        checked = !useMySettings,
+                        onCheckedChange = { wantFast ->
+                            // Turning it ON needs no ceremony -- it is the safe direction, and the
+                            // configuration everything about this tab was measured on. Turning it
+                            // OFF is the one that can take the feed to single figures, so that is
+                            // the one that explains itself first.
+                            if (wantFast) onUseMySettings(false) else confirmSlow = true
+                        },
+                        enabled = !running,
+                    )
+                }
+
+                if (confirmSlow) {
+                    AlertDialog(
+                        onDismissRequest = { confirmSlow = false },
+                        title = { Text(stringResource(R.string.live_fast_confirm_title)) },
+                        text = { Text(stringResource(R.string.live_fast_confirm_body)) },
+                        confirmButton = {
+                            TextButton({ confirmSlow = false; onUseMySettings(true) }) {
+                                Text(stringResource(R.string.live_fast_confirm_ok))
+                            }
+                        },
+                        dismissButton = {
+                            TextButton({ confirmSlow = false }) {
+                                Text(stringResource(R.string.common_cancel))
+                            }
+                        },
+                    )
+                }
+
+                if (note != null)
+                    Text(note, style = MaterialTheme.typography.bodySmall,
+                         color = MaterialTheme.colorScheme.error)
             }
-            Switch(
-                // Inverted: fast mode ON is useMySettings OFF.
-                checked = !useMySettings,
-                onCheckedChange = { wantFast ->
-                    // Turning it ON needs no ceremony -- it is the safe direction, and the
-                    // configuration everything about this tab was measured on. Turning it
-                    // OFF is the one that can take the feed to single figures, so that is
-                    // the one that explains itself first.
-                    if (wantFast) onUseMySettings(false) else confirmSlow = true
-                },
-                enabled = !running,
-            )
         }
-
-        if (confirmSlow) {
-            AlertDialog(
-                onDismissRequest = { confirmSlow = false },
-                title = { Text(stringResource(R.string.live_fast_confirm_title)) },
-                text = { Text(stringResource(R.string.live_fast_confirm_body)) },
-                confirmButton = {
-                    TextButton({ confirmSlow = false; onUseMySettings(true) }) {
-                        Text(stringResource(R.string.live_fast_confirm_ok))
-                    }
-                },
-                dismissButton = {
-                    TextButton({ confirmSlow = false }) {
-                        Text(stringResource(R.string.common_cancel))
-                    }
-                },
-            )
-        }
-
-        if (note != null)
-            Text(note, style = MaterialTheme.typography.bodySmall,
-                 color = MaterialTheme.colorScheme.error)
 
         Spacer(Modifier.height(8.dp))
     }
