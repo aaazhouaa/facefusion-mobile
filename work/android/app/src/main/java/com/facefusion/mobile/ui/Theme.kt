@@ -156,10 +156,11 @@ private val FfTypography = Typography(
 /** The base of the FACEFUSION wordmark; the two weights are applied per-span at the call site. */
 val WordmarkStyle = TextStyle(
     fontFamily = FontFamily.SansSerif,
-    fontSize = 26.sp,
+    // 26.sp shrunk by 31% (x0.69), matching the smaller brand band in [AppScaffold].
+    fontSize = 18.sp,
     // Wide tracking is what makes an all-caps wordmark read as a mark rather than as a
-    // shouted sentence.
-    letterSpacing = 4.sp,
+    // shouted sentence. Scaled with the font size so the look is unchanged at 69%.
+    letterSpacing = 2.8.sp,
 )
 
 /**

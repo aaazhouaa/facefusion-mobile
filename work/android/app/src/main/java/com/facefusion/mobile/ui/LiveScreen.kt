@@ -120,9 +120,6 @@ fun LiveScreen(
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(stringResource(R.string.live_title),
-             style = MaterialTheme.typography.titleMedium)
-
         // ---------------------------------------------------------------- source
         //
         // ONE fold for both states: empty or filled it is the same collapsible card, so

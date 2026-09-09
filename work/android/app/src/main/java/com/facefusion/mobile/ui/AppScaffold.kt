@@ -43,49 +43,42 @@ fun AppScaffold(
             // The brand band. It follows the theme background (day #F7F8FA / night
             // #121212) instead of a fixed teal gradient, so switching the scheme recolors
             // the whole window including the header and status bar. The wordmark inherits
-            // onBackground: dark text on the light band, light text on the dark one. A
-            // hairline at the bottom keeps the band's edge visible on the light scheme.
+            // onBackground: dark text on the light band, light text on the dark one.
+            // No divider and nothing under the mark: the band ends at the wordmark.
             Box(
                 Modifier
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.background),
             ) {
-                Column {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            // targetSdk 35 makes the window edge-to-edge on Android 15, and
-                            // Scaffold insets its CONTENT but not its topBar -- so without this
-                            // the wordmark sits under the status bar and behind the cutout.
-                            .statusBarsPadding()
-                            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        // In dark mode the brand band is 31% fainter -- the mark and the
-                        // wordmark read as chrome rather than content, and the header
-                        // should not out-shout the tiles under it on a dark theme.
-                        val brandAlpha =
-                            if (MaterialTheme.colorScheme.background.luminance() < 0.5f) 0.69f else 1f
-                        AppMark(modifier = Modifier.alpha(brandAlpha))
-                        Wordmark(
-                            Modifier.weight(1f),
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = brandAlpha),
-                        )
-                    }
-                    HorizontalDivider(
-                        thickness = 1.dp,
-                        color = MaterialTheme.colorScheme.surfaceVariant,
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        // targetSdk 35 makes the window edge-to-edge on Android 15, and
+                        // Scaffold insets its CONTENT but not its topBar -- so without this
+                        // the wordmark sits under the status bar and behind the cutout.
+                        .statusBarsPadding()
+                        // The band is 31% shorter than it used to be: the mark (20.7dp)
+                        // and the wordmark are x0.69, and the vertical paddings scale
+                        // with them (8->5.5, 16->11), so the whole band -- and the
+                        // Scaffold's top inset with it -- lands at 69% of its old height.
+                        // The offset lifts the mark and the wordmark 8dp toward the top
+                        // edge; offset moves the DRAW only, so the band's measured height
+                        // and the content inset under it stay as they are.
+                        .offset(y = (-8).dp)
+                        .padding(start = 16.dp, end = 16.dp, top = 5.5.dp, bottom = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                ) {
+                    // In dark mode the brand band is 31% fainter -- the mark and the
+                    // wordmark read as chrome rather than content, and the header
+                    // should not out-shout the tiles under it on a dark theme.
+                    val brandAlpha =
+                        if (MaterialTheme.colorScheme.background.luminance() < 0.5f) 0.69f else 1f
+                    AppMark(size = 20.7.dp, modifier = Modifier.alpha(brandAlpha))
+                    Wordmark(
+                        Modifier.weight(1f),
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = brandAlpha),
                     )
-                    // ⚠ The gap below the RULE, not above it. Before the band existed the
-                    // top bar carried `bottom = 18.dp` and that was the whole separation
-                    // between the wordmark and the first control. The band kept 16.dp but
-                    // spends it ABOVE the divider, so every screen's first row -- the
-                    // Processors chips, the Live title -- ended up flush against the line
-                    // with nothing under it. Part of the top bar rather than of each
-                    // screen, so it measures into the Scaffold's own top inset and no
-                    // screen has to know the band is there.
-                    Spacer(Modifier.height(14.dp))
                 }
             }
         },
