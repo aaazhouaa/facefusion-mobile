@@ -58,6 +58,10 @@ val hasNcnn = File(ncnnDir, "lib/libncnn.a").exists()
 // build checks the required marker and representative files, and stages them when they
 // are absent.  The SDK location is supplied through QNN_SDK_ROOT/QAIRT_SDK_ROOT (or the
 // default understood by stage_qnn.sh).
+//
+// ⚠ Upstream tests the STAGED FILES THEMSELVES, never a marker file the script writes,
+// because its Windows bench stages the tree by hand.  Here the staging script writes
+// `QNN_STAGED.txt`, so the marker is a faithful record of a completed local stage.
 val qnnStageScript = rootProject.file("stage_qnn.sh")
 val qnnTiers = (System.getenv("QNN_HTP_TIERS") ?: "68 69 73 75 79 81")
     .trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
@@ -85,9 +89,20 @@ val qnnStage by tasks.registering {
                 throw GradleException("Missing QNN staging script: ${qnnStageScript.absolutePath}")
             }
             logger.lifecycle("QNN staging is incomplete; running ${qnnStageScript.name}")
-            exec {
-                workingDir(rootProject.projectDir)
-                commandLine("bash", qnnStageScript.absolutePath)
+            // A failure here is reported in terms of STAGING, not of the process that was
+            // meant to do it.  `bash` is not on Gradle's PATH on every bench, and the raw
+            // exec failure names only that -- leaving the reader to work out that the
+            // build wanted QNN libraries and could not fetch them.
+            try {
+                exec {
+                    workingDir(rootProject.projectDir)
+                    commandLine("bash", qnnStageScript.absolutePath)
+                }
+            } catch (e: Exception) {
+                throw GradleException(
+                    "QNN staging is incomplete and ${qnnStageScript.name} could not be run " +
+                    "(${e.message}). Stage by hand -- see docs/rebuild.md -- or run " +
+                    "`bash work/android/stage_qnn.sh` with QNN_SDK_ROOT set to a QAIRT SDK.", e)
             }
         }
     }
@@ -108,8 +123,10 @@ if (prebuiltNativeDir != null) {
 
 android {
     namespace = "com.facefusion.mobile"
-    // The sandbox SDK currently provides platform 34, which is sufficient for compilation.
-    compileSdk = 34
+    // ⚠ compileSdk tracks targetSdk (35), which is what the manifest and the behaviour
+    // changes are written against.  The build sandbox ships platform 35, so the 35 APIs
+    // the app targets are on the classpath.
+    compileSdk = 35
     buildToolsVersion = "35.0.0"
 
     defaultConfig {
@@ -409,8 +426,19 @@ android {
         // build someone is holding is precise and useless to them. 0.7.0 had four
         // APKs and 0.8.0 had ten, and in both cases the NAME could not tell them
         // apart -- which is the whole ambiguity the version rule exists to stop.
-        versionCode = 84
-        versionName = "0.9.12$variantTag"    // "-dev" == NO content gate
+        // 85 = PR #3 lands (squash d041ed4): the swap screen rebuild, the 72dp face tiles,
+        // the monochrome theme with a pinned light/dark choice, and the @Immutable +
+        // 10 Hz recomposition fix.  v0.9.12 is published and is versionCode 84, so this
+        // build has stopped being that release and must stop answering to its name.
+        // 86 = #3's layout reverted on the bench's own judgement, the theme, the perf fix
+        // and the translations kept.  A separate CODE because 85 left this machine and is
+        // installed on the test phone: reusing it would leave two different layouts
+        // answering to one version, which is the ambiguity the rule exists to stop.
+        // 87 = the band's missing gap under its own divider, and the run preview at the
+        // rate the NPU can actually feed it.
+        // 88 = an optional model that is absent by design stopped logging at ERROR.
+        versionCode = 88
+        versionName = "0.9.16$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }
@@ -433,10 +461,12 @@ android {
     if (prebuiltNativeDir == null) externalNativeBuild {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
+            // The version bundled with the local Android SDK; keep it aligned with what
+            // is actually installed in the build sandbox.
             version = "3.28.3"
         }
     }
-    // The build sandbox provides NDK r29; keep this aligned with the selected toolchain.
+    // The build sandbox provides NDK r29; keep this aligned with the installed toolchain.
     ndkVersion = "29.0.14206865"
     if (prebuiltNativeDir != null) {
         sourceSets.getByName("main").jniLibs.srcDir(prebuiltNativeDir)

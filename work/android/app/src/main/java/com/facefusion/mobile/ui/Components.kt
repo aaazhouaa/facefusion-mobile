@@ -1080,11 +1080,14 @@ fun LogBox(
     modifier: Modifier = Modifier,
 ) {
     val scroll = rememberScrollState()
-    // Follow the tail, which is the only part anyone reads while a run is going.
+    // Follow the tail, which is the only part anyone reads while a run is going. Keyed on
+    // `expanded` too: a collapsed box does not scroll, so re-opening it has to catch up.
     LaunchedEffect(text, expanded) {
         if (expanded) scroll.animateScrollTo(scroll.maxValue)
     }
     Column(modifier.fillMaxWidth()) {
+        // The caption IS the toggle -- the whole row, not just the chevron, so the target
+        // is the width of the screen rather than 20 dp.
         Row(
             Modifier
                 .fillMaxWidth()
@@ -1104,8 +1107,8 @@ fun LogBox(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        // Plain `if` for the same reason as SectionCard: AnimatedVisibility in this
-        // verticalScroll could draw the panel over what followed it mid-transition.
+        // Plain `if`, not AnimatedVisibility: this sits inside the screen's verticalScroll,
+        // where a transition can draw the panel over what follows it mid-flight.
         if (expanded) {
             Surface(
                 Modifier.fillMaxWidth().height(170.dp).padding(top = 4.dp),
