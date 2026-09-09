@@ -2770,24 +2770,36 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun clearTarget() {
+        // 删除同步: the pane's trash takes its OWN row out of the batch list with it.
+        // loadTarget queues every pane pick under `source` (需求1), so a delete that
+        // left the row behind showed a clip in 批量添加 that the pane no longer holds --
+        // the residue this fixes. Capture the uri first: the next line nulls it.
+        val queuedFrom = targetSourceUri
         targetSourceUri = null
         dropReferenceFace()
-        // 需求6: DECOUPLED -- the trash on the target pane empties the PANE, not the
-        // queue. The queue belongs to whoever queued it (the pickers); a run with rows
-        // but no visible target is legal now (runBatch reads each row's own uri), so
-        // wiping the list here used to silently delete clips the user queued for later.
-        // Emptying the queue is the DELETE BUTTON's job, one row at a time.
-        previews.closeTarget()
-        targetFile = null
-        targetImage = null
-        targetName = null
-        durationMs = 0L
-        trimStartMs = 0f; trimEndMs = 0f
-        targetAspect = 16f / 9f
-        originalFrame = null
-        paneFallback = null
-        targetVersion++
-        invalidatePreview()
+        // 需求6: the trash on the target pane empties the PANE and the row the pane
+        // itself queued -- but never the rows the batch pickers queued for OTHER clips:
+        // the queue still belongs to whoever queued it, and a run with rows but no
+        // visible target stays legal (runBatch reads each row's own uri). Emptying
+        // those is the DELETE BUTTON's job, one row at a time. Reachable only while
+        // idle (the trash is enabled = idle), so the queue is never mutated mid-run.
+        if (queuedFrom != null)
+            batchQueue = batchQueue.filterNot { it.source == queuedFrom }
+        clearTargetFramesOnly()
+        // ⚠ An EMPTY pane behind a NON-EMPTY queue is the screen lying (用户复测报告：
+        // "添加目标中删除，且批量添加的内容不为空时，换脸结果和添加目标却显示为空").
+        // The pane emptied itself while rows it never queued are still waiting to run --
+        // loadTarget queues every pane pick under `source` (需求1), and the queue keeps
+        // belonging to whoever queued it. Rather than a blank pane over a legal queue,
+        // promote the next queued clip: synchronous clear (clearTargetFramesOnly keeps
+        // the output pane intact), then an async reload into the pane, exactly the
+        // removeFromBatch() fallback path. Only a fully-emptied queue leaves the pane
+        // blank, and that blank is then true.
+        if (queuedFrom != null) {
+            val nextPane = batchQueue.firstOrNull { it.source != null }
+            if (nextPane != null)
+                loadTarget(nextPane.source!!, keepOutput = true)
+        }
         status = ""
     }
 
