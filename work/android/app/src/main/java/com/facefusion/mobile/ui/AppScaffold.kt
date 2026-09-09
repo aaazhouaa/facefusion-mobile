@@ -57,24 +57,26 @@ fun AppScaffold(
                         // Scaffold insets its CONTENT but not its topBar -- so without this
                         // the wordmark sits under the status bar and behind the cutout.
                         .statusBarsPadding()
-                        // The band is 31% shorter than it used to be: the mark (20.7dp)
-                        // and the wordmark are x0.69, and the vertical paddings scale
-                        // with them (8->5.5, 16->11), so the whole band -- and the
-                        // Scaffold's top inset with it -- lands at 69% of its old height.
-                        // The offset lifts the mark and the wordmark 8dp toward the top
-                        // edge; offset moves the DRAW only, so the band's measured height
-                        // and the content inset under it stay as they are.
-                        .offset(y = (-8).dp)
-                        .padding(start = 16.dp, end = 16.dp, top = 5.5.dp, bottom = 11.dp),
+                        // The mark and the wordmark are back, at x1.1 of the size they
+                        // were deleted at (mark 20.7 -> 23dp, wordmark 18 -> 19.8sp), and
+                        // the band that carries them is x1.3 of the height it had then:
+                        // the vertical paddings, the gap and the lift all scale with the
+                        // band (5.5 -> 15, 11 -> 14, 7 -> 9, -8 -> -7), so the extra
+                        // height reads as a taller band, not as a bigger logo. The offset
+                        // lifts the band toward the top edge; offset moves the DRAW only,
+                        // so the band's measured height and the content inset under it
+                        // stay as they are.
+                        .offset(y = (-7).dp)
+                        .padding(start = 16.dp, end = 16.dp, top = 15.dp, bottom = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    horizontalArrangement = Arrangement.spacedBy(9.dp),
                 ) {
-                    // In dark mode the brand band is 31% fainter -- the mark and the
-                    // wordmark read as chrome rather than content, and the header
-                    // should not out-shout the tiles under it on a dark theme.
+                    // In dark mode the brand band is fainter -- the mark and the wordmark
+                    // read as chrome rather than content, and the header should not
+                    // out-shout the tiles under it on a dark theme.
                     val brandAlpha =
                         if (MaterialTheme.colorScheme.background.luminance() < 0.5f) 0.69f else 1f
-                    AppMark(size = 20.7.dp, modifier = Modifier.alpha(brandAlpha))
+                    AppMark(size = 23.dp, modifier = Modifier.alpha(brandAlpha))
                     Wordmark(
                         Modifier.weight(1f),
                         color = MaterialTheme.colorScheme.onBackground.copy(alpha = brandAlpha),

@@ -38,13 +38,10 @@ import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -85,18 +82,15 @@ fun AppMark(size: Dp = 30.dp, modifier: Modifier = Modifier) {
 /**
  * The wordmark.
  *
- * Two weights on one word rather than a display font, because no font may be bundled here
- * (see [Theme.kt]). The weight break at FACE|FUSION is what carries the identity; without
- * it this is just a heading in caps.
+ * A single light weight on the whole word: the FACE|FUSION weight break was dropped and
+ * both halves now render identically to how FACE used to (FontWeight.Light), per request.
+ * The wide tracking on [WordmarkStyle] is what carries the identity instead.
  */
 @Composable
 fun Wordmark(modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.onBackground) {
     Text(
-        buildAnnotatedString {
-            withStyle(SpanStyle(fontWeight = FontWeight.Light)) { append("FACE") }
-            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append("FUSION") }
-        },
-        style = WordmarkStyle,
+        "FACEFUSION",
+        style = WordmarkStyle.copy(fontWeight = FontWeight.Light),
         color = color,
         modifier = modifier,
     )

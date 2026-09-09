@@ -134,9 +134,8 @@ private val FfDark = darkColorScheme(
  * Type.
  *
  * No font file is bundled -- the only faces available offline here are Qualcomm's, which
- * are not ours to ship. So the wordmark is built from weight and letter-spacing on the
- * platform sans instead of a display face. Dropping a licensed .ttf into `res/font/` later
- * changes only [FfTypography] and [WordmarkStyle].
+ * are not ours to ship. Dropping a licensed .ttf into `res/font/` later changes only
+ * [FfTypography] and [WordmarkStyle].
  */
 private val FfTypography = Typography(
     titleMedium = TextStyle(
@@ -153,14 +152,15 @@ private val FfTypography = Typography(
     ),
 )
 
-/** The base of the FACEFUSION wordmark; the two weights are applied per-span at the call site. */
+/** The base of the FACEFUSION wordmark; the weight is applied at the call site. */
 val WordmarkStyle = TextStyle(
     fontFamily = FontFamily.SansSerif,
-    // 26.sp shrunk by 31% (x0.69), matching the smaller brand band in [AppScaffold].
-    fontSize = 18.sp,
+    // 18.sp grown by 10% (x1.1) on restore -- the pre-delete 26.sp base scaled x0.69, and
+    // the restored wordmark now sits at 110% of that deleted size.
+    fontSize = 19.8.sp,
     // Wide tracking is what makes an all-caps wordmark read as a mark rather than as a
-    // shouted sentence. Scaled with the font size so the look is unchanged at 69%.
-    letterSpacing = 2.8.sp,
+    // shouted sentence. Scaled with the font size so the look is unchanged at x1.1.
+    letterSpacing = 3.08.sp,
 )
 
 /**
