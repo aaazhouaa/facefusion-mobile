@@ -1224,9 +1224,17 @@ fun SwapScreen(
             // 若把按钮压成半透明灰，用户看到"目标已选好按钮却是灰的"会以为坏了。
             val ready = hasSource && hasTarget && !modelsMissing &&
                         (!opts.lipSync || hasVoice)
-            val canRun = idle && ready
+            // A batch whose every row has landed (Done/Refused/Failed/Skipped) is a RESULT,
+            // not a pending run. The button used to keep reading "Swap n clips" and stayed
+            // clickable, and pressing it again deleted every finished output just to run
+            // the same batch a second time. It reads "Start" again and stays dead until a
+            // row is waiting again -- clear rows or add clips to run more.
+            val batchDone = batch.isNotEmpty() && batch.none {
+                it.state == BatchState.Waiting || it.state == BatchState.Running
+            }
+            val canRun = idle && ready && !batchDone
             // 只有真正缺条件才置灰；preparing 期间按钮保持品牌色，只是暂时不可点。
-            val dimmed = !busy && !ready
+            val dimmed = !busy && (!ready || batchDone)
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -1267,7 +1275,7 @@ fun SwapScreen(
                     Text(
                         stringResource(
                             if (busy) R.string.swap_cancel
-                            else if (batch.size > 1) R.string.swap_action_batch
+                            else if (batch.size > 1 && !batchDone) R.string.swap_action_batch
                             else R.string.swap_action,
                             batch.size,
                         ),

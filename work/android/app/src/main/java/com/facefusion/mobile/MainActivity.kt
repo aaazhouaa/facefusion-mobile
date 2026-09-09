@@ -681,10 +681,17 @@ class MainActivity : ComponentActivity() {
             status = getString(R.string.status_batch_already_queued)
             return@registerForActivityResult
         }
+        // Item 0 is the VISIBLE target the first time the queue is seeded, and it enters
+        // the list here with no thumbnail of its own: only the freshly picked clips were
+        // seeded below, so its row sat on the play glyph until the run finished. Seed it
+        // alongside them -- runBatch reads targetFile for item 0, not this URI, so the
+        // file URI here is only ever a thumbnail source.
+        val seedingHead = batchQueue.isEmpty()
+        val seedUris = if (seedingHead) listOf(Uri.fromFile(tgt)) + videos else videos
         batchQueue = head + fresh.map {
             BatchItem(it, displayName(it) ?: getString(R.string.batch_unnamed_clip))
         }
-        seedBatchThumbs(fresh, head.size)
+        seedBatchThumbs(seedUris, if (seedingHead) 0 else head.size)
         status = getString(R.string.status_batch_queued, batchQueue.size)
     }
 
@@ -1189,7 +1196,14 @@ class MainActivity : ComponentActivity() {
                                     // the batch runner deliberately ignores trim, because
                                     // one range cannot mean anything across clips of
                                     // different lengths.
-                                    if (batchQueue.size > 1) runBatch() else runSwap()
+                                    // ⚠ NOT when every row has already landed: re-running
+                                    // a finished batch from here deleted every finished
+                                    // output just to make the same clips again.
+                                    if (batchQueue.size > 1 &&
+                                        batchQueue.any {
+                                            it.state == BatchState.Waiting ||
+                                            it.state == BatchState.Running
+                                        }) runBatch() else runSwap()
                                 },
                                 batch = batchQueue,
                                 batchAutoSave = opts.batchAutoSave,
@@ -2569,8 +2583,10 @@ class MainActivity : ComponentActivity() {
         if (gone != null && batchQueue.any { it.output == gone })
             batchQueue = batchQueue.map {
                 if (it.output == gone)
-                    it.copy(state = BatchState.Waiting, output = null, thumb = null,
-                            detail = null)
+                    // The THUMBNAIL stays: it is only ever a picture of the clip, and the
+                    // row is not clickable while output is null, so nothing can reach the
+                    // dead file through it.
+                    it.copy(state = BatchState.Waiting, output = null, detail = null)
                 else it
             }
     }
@@ -3326,7 +3342,12 @@ class MainActivity : ComponentActivity() {
         // separate copy in the gallery and is unaffected.
         batchQueue = batchQueue.map {
             it.output?.let { f -> runCatching { f.delete() } }
-            it.copy(state = BatchState.Waiting, output = null, detail = null, thumb = null)
+            // ⚠ KEEP the row's thumbnail. The queue's thumbs double as pre-run placeholders:
+            // each row keeps the frame it was seeded with, and the copy made when its clip
+            // last finished. Nulling them here blanked the whole queue on every Start -- the
+            // rows then sat on the play glyph until their clip came round again -- for a
+            // state that is about to be re-seeded one row at a time as each output lands.
+            it.copy(state = BatchState.Waiting, output = null, detail = null)
         }
 
         // The foreground service, for the process rather than for the work. See
