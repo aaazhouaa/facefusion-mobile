@@ -324,8 +324,8 @@ fun SwapScreen(
     // to be on every screen, not just while something was running.
     var logExpanded by rememberSaveable { mutableStateOf(false) }
     // The batch queue lives in a foldable card, default CLOSED, placed just above Output
-    // settings. Batch is a mode you enter deliberately, not something every fresh target
-    // needs standing open.
+    // settings. The card is always on the page now -- an empty queue is the standing
+    // ask for the first clip -- it just stays folded until opened.
     var batchMenuExpanded by rememberSaveable { mutableStateOf(false) }
     // The finished output (video player + save/share/delete) folds under its own card,
     // default CLOSED, above the log.
@@ -688,23 +688,29 @@ fun SwapScreen(
                     actions = {
                         // Shoot a face instead of finding one. Stills only: a source is an
                         // identity, and there is no video form of that.
-                        if (idle) {
-                            IconButton(onCaptureSource, Modifier.size(26.dp)) {
-                                Icon(painterResource(R.drawable.ic_photo_camera),
-                                     stringResource(R.string.swap_capture_source), Modifier.size(14.dp),
-                                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
+                        //
+                        // The camera stays through a run -- vanishing mid-swap made the
+                        // tile jump -- dimmed to 31% (a 69% opacity drop) and deaf to taps
+                        // until the run ends.
+                        IconButton(onCaptureSource, Modifier.size(26.dp), enabled = idle) {
+                            Icon(painterResource(R.drawable.ic_photo_camera),
+                                 stringResource(R.string.swap_capture_source), Modifier.size(14.dp),
+                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                     .copy(alpha = if (idle) 1f else 0.31f))
                         }
                     },
                     bottomActions = {
                         // Removing the source is not destructive -- it drops a reference to a photo
                         // the user still has -- so unlike the output it does not confirm.
-                        if (hasSource && idle) {
-                            IconButton(onClearSource, Modifier.size(26.dp)) {
+                        //
+                        // Same as the camera above: visible through a run, 31%, inert.
+                        if (hasSource) {
+                            IconButton(onClearSource, Modifier.size(26.dp), enabled = idle) {
                                 Icon(Icons.Default.Delete,
                                      stringResource(R.string.swap_remove_source),
                                      Modifier.size(14.dp),
-                                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                         .copy(alpha = if (idle) 1f else 0.31f))
                             }
                         }
                     },
@@ -921,141 +927,137 @@ fun SwapScreen(
         // 批量添加，位于输出设置上方，与输出设置同为可折叠菜单（默认折叠）。
         // 内部容器采用与"源人脸"输入行相同的卡片样式，承载"添加更多片段"、
         // "每个片段完成后立即保存到相册"以及已加入的片段列表。
-        if ((hasTarget && !imageTarget) || batch.isNotEmpty()) {
-            SectionCard(
-                stringResource(R.string.swap_batch_menu),
-                collapsible = true,
-                expanded = batchMenuExpanded,
-                onToggle = { batchMenuExpanded = !batchMenuExpanded },
-                trailing = {
-                    if (batch.isNotEmpty() || hasTarget) {
-                        Row(
-                            Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable(enabled = idle) { onBatchAutoSave(!batchAutoSave) }
-                                .padding(horizontal = 4.dp, vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Box(
-                                Modifier
-                                    .size(16.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        if (batchAutoSave) MaterialTheme.colorScheme.primary.copy(alpha = 0.69f)
-                                        else MaterialTheme.colorScheme.outlineVariant
-                                    ),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                if (batchAutoSave) {
-                                    Icon(Icons.Default.Check, null, Modifier.size(11.dp),
-                                         tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.69f))
-                                }
-                            }
-                            Spacer(Modifier.width(4.dp))
-                            Text(stringResource(R.string.batch_autosave),
-                                 style = MaterialTheme.typography.bodySmall,
-                                 fontSize = 11.sp)
+        SectionCard(
+            stringResource(R.string.swap_batch_menu),
+            collapsible = true,
+            expanded = batchMenuExpanded,
+            onToggle = { batchMenuExpanded = !batchMenuExpanded },
+            trailing = {
+                Row(
+                    Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(enabled = idle) { onBatchAutoSave(!batchAutoSave) }
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier
+                            .size(16.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (batchAutoSave) MaterialTheme.colorScheme.primary.copy(alpha = 0.69f)
+                                else MaterialTheme.colorScheme.outlineVariant
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (batchAutoSave) {
+                            Icon(Icons.Default.Check, null, Modifier.size(11.dp),
+                                 tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.69f))
                         }
                     }
-                },
+                    Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.batch_autosave),
+                         style = MaterialTheme.typography.bodySmall,
+                         fontSize = 11.sp)
+                }
+            },
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant,
+                            RoundedCornerShape(16.dp)),
             ) {
-                Box(
+                // 添加片段按钮（+） + 缩略图列表，横向排列
+                Row(
                     Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(MaterialTheme.colorScheme.surface)
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant,
-                                RoundedCornerShape(16.dp)),
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 6.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // 添加片段按钮（+） + 缩略图列表，横向排列
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState())
-                            .padding(horizontal = 6.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        // "+" 添加按钮，64dp，始终最左侧
-                        if (hasTarget && !imageTarget && idle) {
-                            IconButton(onAddToBatch,
-                                       modifier = Modifier
-                                           .size(64.dp)
-                                           .clip(RoundedCornerShape(8.dp))
-                                           .background(MaterialTheme.colorScheme.surfaceVariant),
-                                       ) {
-                                Icon(Icons.Default.Add, stringResource(R.string.swap_batch_add),
-                                     Modifier.size(28.dp),
+                    // "+" 添加按钮，64dp，始终最左侧
+                    if (hasTarget && !imageTarget && idle) {
+                        IconButton(onAddToBatch,
+                                   modifier = Modifier
+                                       .size(64.dp)
+                                       .clip(RoundedCornerShape(8.dp))
+                                       .background(MaterialTheme.colorScheme.surfaceVariant),
+                                   ) {
+                            Icon(Icons.Default.Add, stringResource(R.string.swap_batch_add),
+                                 Modifier.size(28.dp),
+                                 tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    // 已添加的片段缩略图，64dp，横向排列
+                    batch.forEachIndexed { i, item ->
+                        Box(
+                            Modifier
+                                .size(64.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .clickable(enabled = idle && item.output != null) {
+                                    onOpenBatchOutput(i)
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (item.thumb != null) {
+                                Image(
+                                    item.thumb!!.asImageBitmap(), null,
+                                    Modifier
+                                        .fillMaxSize()
+                                        .clip(RoundedCornerShape(6.dp)),
+                                    contentScale = ContentScale.Crop,
+                                )
+                            } else {
+                                Icon(Icons.Default.PlayArrow, null,
+                                     Modifier.size(24.dp),
                                      tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                        }
-                        // 已添加的片段缩略图，64dp，横向排列
-                        batch.forEachIndexed { i, item ->
-                            Box(
-                                Modifier
-                                    .size(64.dp)
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                                    .clickable(enabled = idle && item.output != null) {
-                                        onOpenBatchOutput(i)
+                            // 状态角标
+                            if (item.state != BatchState.Waiting) {
+                                Text(
+                                    stringResource(when (item.state) {
+                                        BatchState.Running -> R.string.batch_running
+                                        BatchState.Done -> R.string.batch_done
+                                        BatchState.Refused -> R.string.batch_refused
+                                        BatchState.Failed -> R.string.batch_failed
+                                        BatchState.Skipped -> R.string.batch_skipped
+                                        else -> R.string.batch_waiting
+                                    }),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 7.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = when (item.state) {
+                                        BatchState.Done -> FfRed
+                                        BatchState.Failed -> MaterialTheme.colorScheme.error
+                                        else -> MaterialTheme.colorScheme.onSurfaceVariant
                                     },
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                if (item.thumb != null) {
-                                    Image(
-                                        item.thumb!!.asImageBitmap(), null,
-                                        Modifier
-                                            .fillMaxSize()
-                                            .clip(RoundedCornerShape(6.dp)),
-                                        contentScale = ContentScale.Crop,
-                                    )
-                                } else {
-                                    Icon(Icons.Default.PlayArrow, null,
-                                         Modifier.size(24.dp),
-                                         tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                                // 状态角标
-                                if (item.state != BatchState.Waiting) {
-                                    Text(
-                                        stringResource(when (item.state) {
-                                            BatchState.Running -> R.string.batch_running
-                                            BatchState.Done -> R.string.batch_done
-                                            BatchState.Refused -> R.string.batch_refused
-                                            BatchState.Failed -> R.string.batch_failed
-                                            BatchState.Skipped -> R.string.batch_skipped
-                                            else -> R.string.batch_waiting
-                                        }),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontSize = 7.sp,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = when (item.state) {
-                                            BatchState.Done -> FfRed
-                                            BatchState.Failed -> MaterialTheme.colorScheme.error
-                                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                        },
-                                        modifier = Modifier
-                                            .align(Alignment.BottomCenter)
-                                            .background(
-                                                MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
-                                                RoundedCornerShape(3.dp),
-                                            )
-                                            .padding(horizontal = 3.dp, vertical = 1.dp),
-                                    )
-                                }
-                                // 删除按钮
-                                if (idle) {
-                                    IconButton(
-                                        { onRemoveFromBatch(i) },
-                                        modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .size(18.dp)
-                                            .offset(x = 2.dp, y = (-2).dp),
-                                    ) {
-                                        Icon(Icons.Default.Delete,
-                                             stringResource(R.string.batch_remove),
-                                             Modifier.size(12.dp),
-                                             tint = Color.White)
-                                    }
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .background(
+                                            MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                                            RoundedCornerShape(3.dp),
+                                        )
+                                        .padding(horizontal = 3.dp, vertical = 1.dp),
+                                )
+                            }
+                            // 删除按钮
+                            if (idle) {
+                                IconButton(
+                                    { onRemoveFromBatch(i) },
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .size(18.dp)
+                                        .offset(x = 2.dp, y = (-2).dp),
+                                ) {
+                                    Icon(Icons.Default.Delete,
+                                         stringResource(R.string.batch_remove),
+                                         Modifier.size(12.dp),
+                                         tint = Color.White)
                                 }
                             }
                         }

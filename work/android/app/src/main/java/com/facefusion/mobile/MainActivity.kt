@@ -1215,7 +1215,14 @@ class MainActivity : ComponentActivity() {
                                     outputFile != null &&
                                     batchQueue.any { it.output == outputFile },
                                 onBatchAutoSave = { on ->
-                                    applyOpts(opts.copy(batchAutoSave = on))
+                                    // A gallery preference -- nothing the pipeline reads.
+                                    // applyOpts() nulls the preview and the result and redraws
+                                    // both, which is the flicker: persist the flag and leave
+                                    // every frame on screen alone.
+                                    opts = opts.copy(batchAutoSave = on)
+                                    // `this` here is the composable scope, not the
+                                    // activity -- name the receiver for the save.
+                                    opts.save(this@MainActivity)
                                 },
                                 onOpenBatchOutput = { i ->
                                     val q = batchQueue.getOrNull(i)
