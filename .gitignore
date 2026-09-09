@@ -109,6 +109,7 @@ work/qnn/htp_backend_*.json
 # Release signing. The keystore is NOT recoverable -- back it up somewhere safe. If it is
 # lost, no future build can ever update an already-installed app.
 work/android/*.jks
+work/android/*.keystore
 work/android/keystore.properties
 
 # README media: the GIFs and stills in media/ ARE tracked -- they are the public face of
