@@ -118,6 +118,8 @@ data class RunUi(
     val framesDone: Int = 0,
     val framesTotal: Int = 0,
     val elapsedS: Double = 0.0,
+    /** True while a batch is between START and its rows being reset for the next one. */
+    val canCancel: Boolean = false,
 )
 
 @Composable
@@ -213,6 +215,15 @@ fun SwapScreen(
     hasOutput: Boolean,
     /** The finished video, for the output pane. Null when the target was a still. */
     outputFile: File?,
+    /**
+     * The OUTPUT's own width/height (rotation-corrected), 0 until known. The result pane
+     * sizes itself from these when the target pane has no frame to read -- a batch run
+     * standing on an empty pane would otherwise fall back to a landscape 16:9 box and
+     * letterbox a portrait clip into an unreadable sliver: the "cannot tell portrait from
+     * landscape" report.
+     */
+    outputW: Int,
+    outputH: Int,
     /** True when the run was cancelled, so the output is only as long as it got. */
     outputPartial: Boolean,
     onSaveFrame: (Int) -> Unit,
@@ -846,8 +857,11 @@ fun SwapScreen(
         // the pane, really -- slid off the first screen; the button was still THERE and
         // still clickable at the edge of the fold, it just could not be seen.
         val maxResultH = (screenH - 460).dp.coerceIn(180.dp, 420.dp)
-        val tW = preview.original?.width ?: 0
-        val tH = preview.original?.height ?: 0
+        // 方向三级回退：输出文件自身（runBatch/onOpenBatchOutput 从输出缩略图记录，同比例）
+        // → 目标窗格第一帧 → targetAspect。批量跑在空窗格上时目标帧不存在，旧实现直接
+        // 落到 16:9 的 paneHeight，竖屏输出被压成横向小条，读不出方向。
+        val tW = outputW.takeIf { it > 0 } ?: preview.original?.width ?: 0
+        val tH = outputH.takeIf { it > 0 } ?: preview.original?.height ?: 0
         val resultH: Dp
         if (tW > 0 && tH > 0) {
             val aspect = tW.toFloat() / tH.toFloat()   // width / height
@@ -861,8 +875,14 @@ fun SwapScreen(
         }
         // The image box matches the image's OWN aspect ratio: a portrait result is no
         // longer letterboxed into grey side bars by a full-width box. The column stays
-        // full width; contentWidth centres the (narrower) box inside it.
-        val resultW: Dp? = if (tW > 0 && tH > 0) resultH * (tW.toFloat() / tH.toFloat()) else null
+        // full width; contentWidth centres the (narrower) box inside it. When neither the
+        // output nor the pane has a frame to read, the remembered target aspect still
+        // shapes the box -- a portrait clip must never fall back to a full-width box.
+        val resultW: Dp? = when {
+            tW > 0 && tH > 0 -> resultH * (tW.toFloat() / tH.toFloat())
+            targetAspect > 0f -> resultH * targetAspect
+            else -> null
+        }
 
         // Always shown by default. The placeholder reads as a call to action until the
         // inputs exist, and once they do it is the after half of the before/after.
@@ -980,21 +1000,21 @@ fun SwapScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     // "+" 添加按钮，64dp，始终最左侧。
-                    // 常驻：只在运行/处理中禁点，不从组合里移除——挖走按钮会让
-                    // "加一个片段"在每次跑批期间变成一个不存在的东西。
-                    if (hasTarget && !imageTarget) {
-                        IconButton(
-                            onAddToBatch,
-                            enabled = idle,
-                            modifier = Modifier
-                                .size(64.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                        ) {
-                            Icon(Icons.Default.Add, stringResource(R.string.swap_batch_add),
-                                 Modifier.size(28.dp),
-                                 tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+                    // 需求2: 无条件渲染——旧判定 (hasTarget && !imageTarget) 让按钮在
+                    // "添加目标"为空时整个消失，批量菜单从此没有入口。点击事件除正在
+                    // 生成视频（run.busy）外始终生效：队列一旦开始跑就固定下来，防止
+                    // 跑批中途改队列。
+                    IconButton(
+                        onAddToBatch,
+                        enabled = !run.busy,
+                        modifier = Modifier
+                            .size(64.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                    ) {
+                        Icon(Icons.Default.Add, stringResource(R.string.swap_batch_add),
+                             Modifier.size(28.dp),
+                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     // 已添加的片段缩略图，64dp，横向排列
                     batch.forEachIndexed { i, item ->
@@ -1030,6 +1050,7 @@ fun SwapScreen(
                                         BatchState.Refused -> R.string.batch_refused
                                         BatchState.Failed -> R.string.batch_failed
                                         BatchState.Skipped -> R.string.batch_skipped
+                                        BatchState.Cancelled -> R.string.batch_cancelled
                                         else -> R.string.batch_waiting
                                     }),
                                     style = MaterialTheme.typography.labelSmall,
@@ -1228,19 +1249,37 @@ fun SwapScreen(
             // READY = 两个输入都在、模型齐、Lip Sync 有驱动音。它刻意不含 idle：
             // 添加目标后要复制视频文件并读元数据（preparing，可能耗时数秒），期间
             // 若把按钮压成半透明灰，用户看到"目标已选好按钮却是灰的"会以为坏了。
-            val ready = hasSource && hasTarget && !modelsMissing &&
-                        (!opts.lipSync || hasVoice)
+            // 需求6 配套: the queue is self-held now -- rows run on their OWN uris, so
+            // a queue with runnable rows can start even with an empty target pane;
+            // requiring hasTarget here left the button dead on exactly the screen a
+            // row delete produces (pane cleared, queue intact).
+            val ready = hasSource &&
+                        (hasTarget || batch.any {
+                            it.state == BatchState.Waiting ||
+                            it.state == BatchState.Running ||
+                            it.state == BatchState.Cancelled
+                        }) &&
+                        !modelsMissing && (!opts.lipSync || hasVoice)
             // A batch whose every row has landed (Done/Refused/Failed/Skipped) is a RESULT,
             // not a pending run. The button used to keep reading "Swap n clips" and stayed
             // clickable, and pressing it again deleted every finished output just to run
             // the same batch a second time. It reads "Start" again and stays dead until a
             // row is waiting again -- clear rows or add clips to run more.
+            // 需求5: Cancelled rows are RUNNABLE again -- a stopped batch is a batch
+            // the user may want to finish, so the button comes back instead of staying
+            // dead until a row is cleared by hand.
             val batchDone = batch.isNotEmpty() && batch.none {
-                it.state == BatchState.Waiting || it.state == BatchState.Running
+                it.state == BatchState.Waiting || it.state == BatchState.Running ||
+                it.state == BatchState.Cancelled
             }
+            // 需求5: runBatchUi (canCancel) means a batch is between START and its
+            // rows being reset -- the button must answer a cancel through that whole
+            // window, including the instant busy has dropped but the rows still read
+            // finished.
             val canRun = idle && ready && !batchDone
+            val clickable = busy || run.canCancel || canRun
             // 只有真正缺条件才置灰；preparing 期间按钮保持品牌色，只是暂时不可点。
-            val dimmed = !busy && (!ready || batchDone)
+            val dimmed = !clickable && (!ready || batchDone)
             Box(
                 Modifier
                     .fillMaxWidth()
@@ -1258,8 +1297,8 @@ fun SwapScreen(
                         else MaterialTheme.colorScheme.outlineVariant,
                         RoundedCornerShape(16.dp),
                     )
-                    .clickable(enabled = busy || canRun) {
-                        if (busy) onCancel() else onSwap()
+                    .clickable(enabled = clickable) {
+                        if (busy || run.canCancel) onCancel() else onSwap()
                     },
                 contentAlignment = Alignment.Center,
             ) {
@@ -1280,7 +1319,7 @@ fun SwapScreen(
                     }
                     Text(
                         stringResource(
-                            if (busy) R.string.swap_cancel
+                            if (busy || run.canCancel) R.string.swap_cancel
                             else if (batch.size > 1 && !batchDone) R.string.swap_action_batch
                             else R.string.swap_action,
                             batch.size,

@@ -413,6 +413,7 @@
     <string name="batch_refused">refused</string>
     <string name="batch_failed">failed</string>
     <string name="batch_skipped">skipped</string>
+    <string name="batch_cancelled">cancelled</string>
     <string name="batch_remove">Remove from queue</string>
     <string name="batch_unnamed_clip">clip</string>
     <string name="swap_output_settings">Output settings</string>

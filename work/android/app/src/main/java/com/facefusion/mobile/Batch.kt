@@ -31,6 +31,13 @@ data class BatchItem(
      */
     val detail: String? = null,
     /**
+     * The uri this clip was QUEUED from -- a content uri from the pickers. The pane's own
+     * pick queues with it too (需求1), and a row whose clip is the one on screen is
+     * identified by comparing against it (MainActivity.targetSourceUri), so deleting that
+     * row knows the pane is showing a clip that no longer exists anywhere in the list.
+     */
+    val source: Uri? = null,
+    /**
      * A small frame from [output], for the queue row.
      *
      * Made once, when the clip finishes, on the worker thread that produced it -- a
@@ -55,7 +62,12 @@ data class BatchItem(
  *
  * ⚠ [Refused] is deliberately NOT [Failed]. The content gate blocking a clip is the app
  * working, and a batch of twelve in which one is refused has eleven successes and one
- * correct refusal — not a failure to investigate. They are shown differently and counted
+ * correct refusal -- not a failure to investigate. They are shown differently and counted
  * separately for that reason.
+ *
+ * ⚠ [Cancelled] is deliberately NOT [Failed] and NOT [Skipped] (需求5): the user stopping
+ * a run is neither an error nor the app declining to work. Rows that never started get it
+ * when a run is stopped, and so does the row that was mid-encode when the stop landed and
+ * could not write anything.
  */
-enum class BatchState { Waiting, Running, Done, Refused, Failed, Skipped }
+enum class BatchState { Waiting, Running, Done, Refused, Failed, Skipped, Cancelled }

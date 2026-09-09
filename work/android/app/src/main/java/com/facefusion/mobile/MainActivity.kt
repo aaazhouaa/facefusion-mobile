@@ -50,6 +50,14 @@ class MainActivity : ComponentActivity() {
     private var liveSources by mutableStateOf<List<LiveSource>>(emptyList())
     private var liveSourceIndex by mutableIntStateOf(0)
     private var liveLargestOnly by mutableStateOf(false)
+    /**
+     * The SOURCE uri of what the target pane holds -- a content uri for a clip picked
+     * through SAF, null for the file-scoped identity the pane is keyed on today. The batch
+     * list and the pane are decoupled (需求6), but a target added through the pane still
+     * appears in the queue (需求1): this is the identity that tells a row delete whether
+     * the pane is showing the clip that row held.
+     */
+    private var targetSourceUri by mutableStateOf<Uri?>(null)
     private var targetFile by mutableStateOf<File?>(null)
     private var targetName by mutableStateOf<String?>(null)
 
@@ -155,6 +163,18 @@ class MainActivity : ComponentActivity() {
     private var outputPartial by mutableStateOf(false)
 
     /**
+     * The finished OUTPUT's own dimensions, rotation-corrected -- not the target's.
+     *
+     * A batch run stands on a possibly EMPTY target pane (需求6), so the result pane used
+     * to have nothing to read its portrait/landscape shape from and fell back to a
+     * 16:9 box. These come from each finished clip's thumbnail (same aspect as the
+     * encoded file) and travel with [outputFile]: set when a clip finishes or a batch row
+     * is opened, cleared wherever the output reference is dropped.
+     */
+    private var outputW by mutableStateOf(0)
+    private var outputH by mutableStateOf(0)
+
+    /**
      * The SINGLE-clip run auto-saved its own output on completion.
      *
      * Kept separately from the queue: `outputAutoSaved` on the screen is a batch notion
@@ -239,6 +259,15 @@ class MainActivity : ComponentActivity() {
      * clip they were written for. The queue is what happens AFTER it.
      */
     private var batchQueue by mutableStateOf<List<BatchItem>>(emptyList())
+    /**
+     * True from the moment a batch STARTS until its rows are reset for the next one.
+     *
+     * 需求5: `busy` drops back the instant the loop unwinds, and a cancelled batch's
+     * rows read Done/Cancelled rather than Waiting -- so the batchDone guard made the
+     * button dead with no way back. runBatchUi covers the window the rows are still
+     * "in flight", and it is what the main button keys its cancel on.
+     */
+    private var runBatchUi by mutableStateOf(false)
 
     /**
      * Which lens Live uses. In memory only, deliberately: it is not a [SwapOptions] field
@@ -343,6 +372,16 @@ class MainActivity : ComponentActivity() {
     private val previews = PreviewEngine()
     private var originalFrame by mutableStateOf<Bitmap?>(null)
     private var swappedFrame by mutableStateOf<Bitmap?>(null)
+    /**
+     * 目标窗格的固定帧。
+     *
+     * 目标加载后 [onTrimChanged] 会跟随"输出设置→片段"滑条 seek 并更新 [originalFrame]，
+     * 这曾把"添加目标"的缩略图也一起换掉——拖一下滑条，目标画面就变了。用户报告这是
+     * bug：滑条是输出范围选择器，不该动目标缩略图。所以 [originalFrame] 继续作为换脸
+     * 预览的输入帧（预览哪个时刻由滑条决定），而目标窗格显示 [paneFallback]——只在
+     * loadTarget/clearTarget 时设置，滑条永远不碰它。
+     */
+    private var paneFallback by mutableStateOf<Bitmap?>(null)
     private var previewWarm by mutableStateOf(false)
     private var previewBusy by mutableStateOf(false)
     private var previewNote by mutableStateOf<String?>(null)
@@ -619,7 +658,9 @@ class MainActivity : ComponentActivity() {
         // How many came back, in the log: "I picked several and got one clip" and "I picked
         // one" are the same screen afterwards, and only this line tells them apart.
         android.util.Log.i("ffbatch", "picker returned " + uris.size + " uri(s)")
-        batchQueue = emptyList()
+        // 需求6: the pick no longer WIPES the queue. The queue is its own artifact --
+        // whatever the user queued through the + tile survives a target change; the
+        // picks below are APPENDED (deduped), never a reset.
         loadTarget(uris.first())
         // ⚠ VIDEOS ONLY, and the first pick decides whether there is a queue at all.
         //
@@ -634,25 +675,27 @@ class MainActivity : ComponentActivity() {
         val videos = uris.filter {
             contentResolver.getType(it)?.startsWith("image/") != true
         }
-        if (images > 0 && videos.size < 2) {
-            // Nothing to queue: either the visible target is the still, or every other pick
-            // was one. The single-target flow is exactly right for that.
-            if (images == uris.size) status = getString(R.string.status_batch_images_only)
+        if (images == uris.size) {
+            // Every pick was a still: nothing can queue (the batch is a video runner),
+            // and the pane already shows the photo. Say so and stop.
+            status = getString(R.string.status_batch_images_only)
             return@registerForActivityResult
         }
-        if (uris.size > 1) {
-            // ⚠ INCLUDING the first. The queue holds every item with the visible target at
-            // index 0, from the pick until the run ends -- one representation, so the UI
-            // and the runner cannot disagree about whether item one is in the list. The
-            // first version kept it out and had both of them add it back, which drew the
-            // visible clip twice.
-            batchQueue = videos.map {
-                BatchItem(it, displayName(it) ?: getString(R.string.batch_unnamed_clip))
-            }
-            seedBatchThumbs(videos, 0)
-            status = if (images > 0)
-                         getString(R.string.status_batch_queued_some, videos.size, images)
-                     else getString(R.string.status_batch_queued, videos.size)
+        if (videos.isNotEmpty()) {
+            // 需求1: EVERY video pick lands in the queue -- one clip or twelve, with or
+            // without stills beside them. The old gate (uris.size > 1) is what kept a
+            // single pick off the list the user was looking at. Appended and deduped,
+            // never a reset: 需求6 decouples the pane from the queue.
+            val start = batchQueue.size
+            batchQueue = (batchQueue + videos.map {
+                BatchItem(it, displayName(it) ?: getString(R.string.batch_unnamed_clip),
+                          source = it)
+            }).distinctBy { it.uri }
+            seedBatchThumbs(videos, start)
+            if (images > 0)
+                status = getString(R.string.status_batch_queued_some, videos.size, images)
+            else if (videos.size > 1)
+                status = getString(R.string.status_batch_queued, videos.size)
         }
     }
     /**
@@ -668,7 +711,17 @@ class MainActivity : ComponentActivity() {
     private val pickMoreTargets = registerForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNullOrEmpty()) return@registerForActivityResult
-        val tgt = targetFile ?: return@registerForActivityResult
+        // ⚠ NO targetFile PREREQUISITE (需求2: the + tile works with nothing loaded).
+        // The queue is its own artifact -- the pane does not feed it. A
+        // takePersistableUriPermission per pick keeps every URI alive for however long
+        // the queue sits before its run; losing one would surface later as
+        // "cannot read <clip>" on a path the app never touched.
+        uris.forEach { uri ->
+            runCatching {
+                contentResolver.takePersistableUriPermission(
+                    uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        }
         val videos = uris.filter {
             contentResolver.getType(it)?.startsWith("image/") != true
         }
@@ -676,33 +729,34 @@ class MainActivity : ComponentActivity() {
             status = getString(R.string.status_batch_images_only)
             return@registerForActivityResult
         }
-        // Seed index 0 with the VISIBLE target the first time, so the queue keeps its one
-        // representation: item 0 is always the clip on screen. runBatch reads targetFile
-        // for that item rather than this URI, so a cache path here would be equivalent.
-        val head = if (batchQueue.isEmpty())
-                       listOf(BatchItem(Uri.fromFile(tgt), targetName ?: tgt.name))
-                   else batchQueue
+        // 需求6: the pane is NOT seeded into the queue here any more. Every row stands
+        // on its own URI (BatchItem.source); the pane is a mirror of whatever the user
+        // picked as the target, never the definition of item 0.
+        //
         // ⚠ Not the same clip twice. Adding a file that is already queued produced a second
         // row with the same name that swapped the same video again into a second output --
         // twice the wait for one result, and two rows nobody could tell apart.
-        val already = head.map { it.uri }.toSet()
+        val already = batchQueue.map { it.uri }.toSet()
         val fresh = videos.filterNot { it in already }
         if (fresh.isEmpty()) {
             status = getString(R.string.status_batch_already_queued)
             return@registerForActivityResult
         }
-        // Item 0 is the VISIBLE target the first time the queue is seeded, and it enters
-        // the list here with no thumbnail of its own: only the freshly picked clips were
-        // seeded below, so its row sat on the play glyph until the run finished. Seed it
-        // alongside them -- runBatch reads targetFile for item 0, not this URI, so the
-        // file URI here is only ever a thumbnail source.
-        val seedingHead = batchQueue.isEmpty()
-        val seedUris = if (seedingHead) listOf(Uri.fromFile(tgt)) + videos else videos
+        val head = batchQueue
         batchQueue = head + fresh.map {
-            BatchItem(it, displayName(it) ?: getString(R.string.batch_unnamed_clip))
+            BatchItem(it, displayName(it) ?: getString(R.string.batch_unnamed_clip),
+                      source = it)
         }
-        seedBatchThumbs(seedUris, if (seedingHead) 0 else head.size)
+        seedBatchThumbs(fresh, head.size)
         status = getString(R.string.status_batch_queued, batchQueue.size)
+        // Regression fix: a "+" pick onto an EMPTY pane used to leave the pane blank -- no
+        // thumbnail in 添加目标, and no frame for the result pane to read its
+        // portrait/landscape shape from. Load the FIRST fresh clip as the visible target
+        // (the queue keeps every clip as before). A pane that already holds a target is
+        // left alone -- that is 需求6's decoupling, kept. loadTarget's own queue-append
+        // dedupes on source, so this cannot double-row the clip.
+        if (targetSourceUri == null && targetFile == null && targetImage == null)
+            loadTarget(fresh.first())
     }
 
     // Audio or video -- upstream's own `source_paths` takes either and reads whichever
@@ -1033,9 +1087,11 @@ class MainActivity : ComponentActivity() {
                 // switch's initial value, because the detector has to have run first -- and
                 // it is exactly the question the user has when a second face is on screen.
                 // One yoloface pass, ~2 ms, and no identity work at all.
-                LaunchedEffect(originalFrame, showFaceBoxes, previewWarm, busy,
-                               targetVersion) {
-                    val frame = originalFrame
+                LaunchedEffect(paneFallback ?: originalFrame, showFaceBoxes,
+                               previewWarm, busy, targetVersion) {
+                    // 框画在窗格显示的画面上：窗格显示固定帧（paneFallback），框就必须
+                    // 是固定帧的框——用滑条当前帧检测的框画在首帧上会错位。
+                    val frame = paneFallback ?: originalFrame
                     // The boxes belong to ONE frame. The moment the frame changes they are
                     // wrong, and being wrong on screen is worse than being absent -- so they
                     // go immediately, before anything below decides whether to recompute.
@@ -1123,7 +1179,10 @@ class MainActivity : ComponentActivity() {
                                 targetH = targetH,
                                 fmt = ::fmt,
                                 preview = PreviewUi(
-                                    original = originalFrame,
+                                    // 目标窗格显示固定帧（paneFallback，只在加载目标时
+                                    // 设置），不跟随"输出设置→片段"滑条 seek——滑条只
+                                    // 驱动换脸预览的输入帧（originalFrame）。
+                                    original = paneFallback ?: originalFrame,
                                     // During a run the pane becomes the live output, which is
                                     // the same thing one frame later. It KEEPS that frame
                                     // after the run: the run invalidated the preview to hand
@@ -1140,7 +1199,7 @@ class MainActivity : ComponentActivity() {
                                     referenceBox = if (showFaceBoxes) referenceBox else null,
                                 ),
                                 run = RunUi(busy, preparing, progress, framesDone,
-                                            framesTotal, elapsedS),
+                                            framesTotal, elapsedS, canCancel = runBatchUi),
                                 status = status,
                                 statusIsError = statusIsError,
                                 log = log,
@@ -1168,6 +1227,8 @@ class MainActivity : ComponentActivity() {
                                 hasOutput = if (targetImage != null) swappedFrame != null
                                             else outputFile != null,
                                 outputFile = outputFile,
+                                outputW = outputW,
+                                outputH = outputH,
                                 outputPartial = outputPartial,
                                 onSaveFrame = ::saveFrameAt,
                                 onSavePreviewFrame = ::savePreviewFrame,
@@ -1209,7 +1270,7 @@ class MainActivity : ComponentActivity() {
                                     // ⚠ NOT when every row has already landed: re-running
                                     // a finished batch from here deleted every finished
                                     // output just to make the same clips again.
-                                    if (batchQueue.size > 1 &&
+                                    if (batchQueue.isNotEmpty() &&
                                         batchQueue.any {
                                             it.state == BatchState.Waiting ||
                                             it.state == BatchState.Running
@@ -1242,6 +1303,11 @@ class MainActivity : ComponentActivity() {
                                     q?.output?.let {
                                         outputFile = it
                                         outputPartial = false
+                                        // Same rule as the run: the pane's direction comes
+                                        // from the OUTPUT itself, so swiping between finished
+                                        // clips re-shapes the box per clip.
+                                        outputW = q.thumb?.width ?: 0
+                                        outputH = q.thumb?.height ?: 0
                                         // The CLIP's saved state, not a blank one. Nulling
                                         // it here is what made a hand-saved clip forget it
                                         // had been saved the moment you swiped past it.
@@ -2224,10 +2290,18 @@ class MainActivity : ComponentActivity() {
         f
     }.getOrNull()
 
-    private fun loadTarget(uri: Uri) {
+    private fun loadTarget(uri: Uri, keepOutput: Boolean = false) {
+        // 需求1: 添加目标后同步进批量列表。the pane's own pick is A BATCH PICK now:
+        // mark where this clip came from, then queue it as the list's only row.
+        targetSourceUri = uri
         dropReferenceFace()
+        // keepOutput：批量删除后的窗格回退调用此函数时，结果窗格的文件状态与画面属于
+        // 上一步设置的 output，不能被清掉——discardOutput 会删掉 outputFile 状态，而
+        // loadTarget 尾部的 clearPreviewFrames 会把 swappedFrame 一起清空，这两处就是
+        // "删除首个缩略图后换脸结果为空"的直接原因。
+        if (!keepOutput) discardOutput()
         if (contentResolver.getType(uri)?.startsWith("image/") == true) {
-            loadTargetImage(uri)
+            loadTargetImage(uri, keepOutput)
             return
         }
         preparing = true
@@ -2283,7 +2357,8 @@ class MainActivity : ComponentActivity() {
                 // The old result belongs to the old target. Dropping it here is also the
                 // fix for a stale-result bug: nothing cleared `outputFile` on a new pick, so
                 // the pane went on offering to save and share the PREVIOUS video.
-                discardOutput()
+                // keepOutput（批量回退）时已在函数入口跳过：结果窗格属于输出文件。
+                if (!keepOutput) discardOutput()
                 targetImage = null
                 targetFile = l.file; durationMs = l.durationMs
                 inputFps = l.fps
@@ -2302,8 +2377,22 @@ class MainActivity : ComponentActivity() {
                 previews.openTarget(l.file.absolutePath, l.fps)
                 targetVersion++
                 // `preview` too, which this path used to leave set -- see clearPreviewFrames.
-                clearPreviewFrames()
+                // keepOutput（批量回退）时保留：结果窗格的画面属于输出文件，不属于目标。
+                if (!keepOutput) clearPreviewFrames()
                 originalFrame = previews.frameAt(0f)
+                // 目标窗格的固定帧 = 首帧。片段滑条 seek 的是 originalFrame，不碰这里，
+                // 所以"添加目标"的缩略图不随滑条变化。
+                paneFallback = originalFrame
+                // 需求1: "添加目标"的内容同步展示在"批量添加"里。The pane's pick is
+                // reflected in the queue -- but only when the queue does not hold it
+                // already: pickTarget queues every pick itself (with the source tag),
+                // and a re-pick of a queued clip must not move it to the end.
+                targetSourceUri?.let { src ->
+                    if (batchQueue.none { it.source == src })
+                        batchQueue = batchQueue + listOf(BatchItem(src,
+                            targetName ?: getString(R.string.batch_unnamed_clip),
+                            source = src))
+                }
             }.onFailure {
                 status = getString(R.string.status_cannot_read_video, it.message ?: "")
             }
@@ -2318,7 +2407,8 @@ class MainActivity : ComponentActivity() {
      * on its side -- the same EXIF bug, and it would have been reintroduced here by using
      * BitmapFactory for the new path.
      */
-    private fun loadTargetImage(uri: Uri) {
+    private fun loadTargetImage(uri: Uri, keepOutput: Boolean = false) {
+        targetSourceUri = uri
         dropReferenceFace()
         preparing = true
         targetName = displayName(uri)
@@ -2329,7 +2419,8 @@ class MainActivity : ComponentActivity() {
                 preparing = false
                 return@launch
             }
-            discardOutput()
+            // keepOutput（批量回退）时跳过：结果窗格的文件状态与画面属于输出。
+            if (!keepOutput) discardOutput()
             previews.closeTarget()
             targetFile = null
             targetImage = bmp
@@ -2338,9 +2429,12 @@ class MainActivity : ComponentActivity() {
             targetAspect = if (bmp.height > 0) bmp.width.toFloat() / bmp.height else 1f
             // The frames, not the pipeline. The double `originalFrame = bmp` this replaces
             // was working around invalidatePreview clearing state this path had just set.
-            clearPreviewFrames()
+            // keepOutput（批量回退）时保留：画面属于输出文件，不属于目标。
+            if (!keepOutput) clearPreviewFrames()
             targetVersion++
             originalFrame = bmp
+            // 目标窗格的固定帧（见 paneFallback）：图片目标没有滑条，但语义一致。
+            paneFallback = bmp
             status = getString(R.string.status_target_ready_image, bmp.width, bmp.height)
             preparing = false
         }
@@ -2596,6 +2690,7 @@ class MainActivity : ComponentActivity() {
         val gone = outputFile
         gone?.delete()
         outputFile = null; outputPartial = false; savedUri = null; savedPathLabel = null
+        outputW = 0; outputH = 0
         singleAutoSaved = false
         // ⚠ A QUEUE ROW MAY BE POINTING AT WHAT WAS JUST DELETED. The row is the only way
         // back to a batch clip, so leaving it Done with a dead File means a thumbnail that
@@ -2675,11 +2770,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun clearTarget() {
+        targetSourceUri = null
         dropReferenceFace()
-        // The queue is a list of TARGETS and item 0 was this one. Keeping the rest after
-        // the visible clip goes away would leave a run that starts on a clip nothing on
-        // screen mentions.
-        batchQueue = emptyList()
+        // 需求6: DECOUPLED -- the trash on the target pane empties the PANE, not the
+        // queue. The queue belongs to whoever queued it (the pickers); a run with rows
+        // but no visible target is legal now (runBatch reads each row's own uri), so
+        // wiping the list here used to silently delete clips the user queued for later.
+        // Emptying the queue is the DELETE BUTTON's job, one row at a time.
         previews.closeTarget()
         targetFile = null
         targetImage = null
@@ -2688,6 +2785,7 @@ class MainActivity : ComponentActivity() {
         trimStartMs = 0f; trimEndMs = 0f
         targetAspect = 16f / 9f
         originalFrame = null
+        paneFallback = null
         targetVersion++
         invalidatePreview()
         status = ""
@@ -2758,32 +2856,110 @@ class MainActivity : ComponentActivity() {
         // doneIx from that dangling output and the result pane came back showing a
         // thumbnail of a clip that had been deleted.
         val out = item.output
+        // Whether the RESULT PANE is showing this row's render -- known before the delete,
+        // because the delete steps the pane off the file and the step must not strand the
+        // pane on nothing when another finished clip exists to show.
+        val wasShown = out != null && outputFile == out
         if (out != null) {
             // Step the pane off it first: the player holds the file, and a pane pointing at
             // a deleted path shows a black rectangle with no way back.
-            if (outputFile == out) { outputFile = null; savedUri = null; savedPathLabel = null }
+            if (outputFile == out) {
+                outputFile = null; savedUri = null; savedPathLabel = null
+                outputW = 0; outputH = 0
+            }
             runCatching { out.delete() }
         }
 
-        if (i == 0) {
-            val rest = batchQueue.drop(1)
-            if (rest.isEmpty()) { batchQueue = emptyList(); clearTarget(); return }
-            // ⚠ Order matters: loadTarget does NOT touch batchQueue (only clearTarget does),
-            // so the shortened queue set here survives the load that follows it.
-            batchQueue = rest
-            loadTarget(rest.first().uri)
-            return
-        }
         // ⚠ DELETE ONE ROW, LOSE ONE ROW. This used to collapse the queue to empty
-        // whenever a single item was left, on the reasoning that one clip is not a queue --
-        // which meant that deleting either row of a TWO-clip list made both disappear, and
-        // from outside that is indistinguishable from a delete button that wipes the list.
-        // Reported as exactly that.
+        // whenever a single item was left, and promote row 1 into the pane -- which is the
+        // coupling 需求6 removes. Promoting ran loadTarget ASYNCHRONOUSLY: between the
+        // delete and the load landing, the screen still showed the deleted clip, and when
+        // it landed it REPLACED what the user had loaded -- a decision nobody asked for.
         //
-        // The list now shows whatever is left, down to one. Swap still routes a queue of
-        // one to the single-run path, so it keeps its trim; that decision belongs at the
-        // button, not in a rule that quietly deletes rows the user did not ask to delete.
+        // 需求3+4: the clip now simply leaves the list. When the deleted row is what the
+        // target pane holds (matched by BatchItem.source, the uri the pane was loaded
+        // from), the pane clears WITH it -- frames and stale run preview alike, in ONE
+        // synchronous recomposition. Nothing re-loads and nothing re-warms: no
+        // asynchronous loadTarget promotion means no window where the screen still shows
+        // the deleted clip, no "loading models" beat, and no "swapping this frame" flash
+        // over a finished result. The result pane below is already at its final state too:
+        // a kept output stays, a deleted one is gone with the row.
         batchQueue = batchQueue.filterIndexed { j, _ -> j != i }
+        // ⚠ But an EMPTY pane behind a non-empty queue is its own bug (用户复测报告：
+        // "删除首个缩略图后，换脸结果和添加目标依旧为空"). The no-promote rule above
+        // protects rows the pane was NOT showing; the row the pane WAS showing owes the
+        // screen a successor. Fall back to the next queued clip -- synchronously cleared,
+        // then reloaded -- and only an emptied queue leaves the pane blank.
+        val paneHeldDeletedRow = item.source != null && item.source == targetSourceUri
+        if (paneHeldDeletedRow) {
+            val nextPane = batchQueue.firstOrNull { it.source != null }
+            if (nextPane != null) {
+                // keepOutput: the result pane's file state and picture belong to the
+                // OUTPUT, not to the target. Loading the next clip must not wipe them --
+                // that wipe is the other half of the "换脸结果为空" report.
+                loadTarget(nextPane.source!!, keepOutput = true)
+            } else {
+                clearTargetFramesOnly()
+            }
+        }
+        // Regression fix: the row the RESULT PANE was showing is gone -- land the pane on
+        // the next finished clip instead of an empty section. The deleted render is gone
+        // with its row (by design), but the other finished rows keep theirs, and losing
+        // the pane entirely is what read as "换脸结果无法读取" in the field report.
+        if (wasShown) {
+            batchQueue.firstOrNull { it.output != null }?.let { next ->
+                val f = next.output ?: return@let
+                outputFile = f
+                outputPartial = false
+                outputW = next.thumb?.width ?: 0
+                outputH = next.thumb?.height ?: 0
+                savedUri = next.savedUri
+                savedPathLabel = next.savedUri?.let { _ -> "Movies/FaceFusion/" + f.name }
+                status = next.name
+                // The PICTURE follows the file. Whatever frame the pane held belonged to
+                // the deleted render (or was cleared with the target above); decode the
+                // successor's own first frame onto the pane, or it sits on a placeholder
+                // with a live Save button -- file state without a picture.
+                lifecycleScope.launch {
+                    val bmp = withContext(Dispatchers.IO) {
+                        runCatching {
+                            android.media.MediaMetadataRetriever().use { r ->
+                                r.setDataSource(f.absolutePath)
+                                r.getFrameAtTime(0)
+                            }
+                        }.getOrNull()
+                    } ?: return@launch
+                    swappedFrame = bmp
+                }
+            }
+        }
+    }
+
+    /**
+     * Empty the target PANES without touching the queue.
+     *
+     * The pane and its frames go with a deleted row (需求3+4); the queue stays what the
+     * user queued. [clearTarget] without the queue wipe -- the two controls can no longer
+     * disagree about who owns the list.
+     */
+    private fun clearTargetFramesOnly() {
+        targetSourceUri = null
+        dropReferenceFace()
+        previews.closeTarget()
+        targetFile = null
+        targetImage = null
+        targetName = null
+        durationMs = 0L
+        inputFps = 0
+        trimStartMs = 0f; trimEndMs = 0f
+        targetAspect = 16f / 9f
+        originalFrame = null
+        // 目标窗格的固定帧随目标一起清（队列清空路径也走这里）。
+        paneFallback = null
+        targetVersion++
+        // The frames, not the pipeline: a run's warm pipeline is the pane's fallback
+        // (swappedFrame ?: preview) and must survive the row delete.
+        clearPreviewFrames()
     }
 
     /**
@@ -2806,7 +2982,8 @@ class MainActivity : ComponentActivity() {
      * user cannot see and would have to guess at.
      */
     private fun pickReferenceFace(x: Float, y: Float) {
-        val frame = originalFrame ?: return
+        // 点击坐标相对窗格显示的画面（固定帧 paneFallback），框也是那帧的框。
+        val frame = paneFallback ?: originalFrame ?: return
         if (busy) return
         // ⚠ THIS USED TO RETURN SILENTLY, and that is the whole of the bug reported as
         // "after output is made i cant choose different face box unless i load the target
@@ -3285,6 +3462,18 @@ class MainActivity : ComponentActivity() {
                     ).swap(tgt!!.absolutePath, out.absolutePath).getOrThrow()
 
                     appendLog("total %.1f s".format((System.currentTimeMillis() - t0) / 1000.0))
+                    // The OUTPUT's own direction, read off the encoder's thread (same rule
+                    // as runBatch's thumbnail): the result pane sizes from the encoded file,
+                    // not from the target pane's frame.
+                    runCatching {
+                        android.media.MediaMetadataRetriever().use { r ->
+                            r.setDataSource(out.absolutePath)
+                            r.getFrameAtTime(0)?.let { fr ->
+                                outputW = fr.width; outputH = fr.height
+                                fr.recycle()
+                            }
+                        }
+                    }
                     out
                 }
             }
@@ -3316,8 +3505,11 @@ class MainActivity : ComponentActivity() {
                 // A refusal is already a finished sentence aimed at the user, and it is not
                 // a fault: prefixing it with "Failed:" and dumping a stack trace would
                 // present a working safety check as a crash.
-                if (it.message == "cancelled") {
-                    // Asked for, not gone wrong: no "Failed:", no stack trace.
+                if (it.message == "cancelled" ||
+                    it.message?.startsWith("cancelled") == true) {
+                    // Asked for, not gone wrong: no "Failed:", no stack trace. The
+                    // "before any frame was written" shape comes from VideoSwapper's
+                    // zero-frame guard and is the same user stop.
                     status = getString(R.string.status_cancelled)
                 } else if (it is ContentGate.Refused) {
                     // The gate's own finished sentence, already localized. NOT an
@@ -3360,10 +3552,13 @@ class MainActivity : ComponentActivity() {
      */
     private fun runBatch() {
         val src = sourceUri ?: return
-        val first = targetFile ?: return
+        // 需求6: the queue is self-held -- every row reads its OWN uri below, so a run
+        // no longer requires anything to be loaded in the target pane.
+        if (batchQueue.isEmpty()) return
         if (opts.lipSync && voiceFile == null) return
         invalidatePreview()
         cancelRequested = false
+        runBatchUi = true
         busy = true; progress = 0f; log = ""
         discardOutput()
         preview = null; framesDone = 0; framesTotal = 0; elapsedS = 0.0
@@ -3451,15 +3646,19 @@ class MainActivity : ComponentActivity() {
             var done = 0
             var refused = 0
             var failed = 0
+            var cancelledClips = 0
             for ((i, item) in batchQueue.withIndex()) {
                 // ⚠ BOTH cancel sources. The button in the app and the one in the
                 // notification are two ways to ask for the same thing, and watching only
                 // the first would ignore whichever the user actually reached for.
                 if (BatchStatus.cancelled) cancelRequested = true
                 if (cancelRequested) {
+                    // 需求5: rows that never started are CANCELLED, not Skipped --
+                    // the user stopped the run, which is not the same thing as the app
+                    // declining to run them.
                     batchQueue = batchQueue.mapIndexed { j, it ->
                         if (j >= i && it.state == BatchState.Waiting)
-                            it.copy(state = BatchState.Skipped) else it
+                            it.copy(state = BatchState.Cancelled) else it
                     }
                     break
                 }
@@ -3476,12 +3675,12 @@ class MainActivity : ComponentActivity() {
                 var partial: File? = null
                 val r = withContext(Dispatchers.Default) {
                     runCatching {
-                        // Only the visible target is already a file; the queued ones are
-                        // URIs the picker handed back, and MediaExtractor wants a path.
-                        // Item 0 is already decoded at cacheDir/target.mp4 by loadTarget,
-                        // so it is used as it stands rather than copied a second time.
-                        val f = if (i == 0) first
-                                else if (item.uri.scheme == "file") File(item.uri.path!!)
+                        // ⚠ SELF-HELD INPUT (需求6): every row runs its OWN uri through
+                        // the same path. Item 0 used to read the visible target's file
+                        // directly (i == 0 -> first), which is exactly what tied the
+                        // queue to the pane. File URIs skip the copy; content URIs are
+                        // copied first because MediaExtractor wants a real path.
+                        val f = if (item.uri.scheme == "file") File(item.uri.path!!)
                                 else copyToCache(item.uri, "batch_" + (i + 1) + ".mp4")
                                     ?: error("cannot read " + item.name)
 
@@ -3561,7 +3760,16 @@ class MainActivity : ComponentActivity() {
                         },
                         { e ->
                             when {
-                                e.message == "cancelled" -> it.copy(state = BatchState.Skipped)
+                                // 需求5: "已取消"是用户主动停止，不是失败也不是跳过。
+                                // Both shapes arrive here: zero frames written throws
+                                // "cancelled before any frame was written" from
+                                // VideoSwapper, frames already written surfaces through
+                                // isCancelled()'s own flag.
+                                e.message == "cancelled" ||
+                                    (cancelRequested && e.message?.startsWith("cancelled") == true) -> {
+                                    cancelledClips++
+                                    it.copy(state = BatchState.Cancelled)
+                                }
                                 e is ContentGate.Refused -> {
                                     refused++
                                     it.copy(state = BatchState.Refused, detail = e.message)
@@ -3575,8 +3783,14 @@ class MainActivity : ComponentActivity() {
                 }
                 // The last finished clip is what the panes show, so the screen is not left
                 // on a frame from four clips ago.
-                r.getOrNull()?.let { (f, _) ->
+                r.getOrNull()?.let { (f, th) ->
                     outputFile = f
+                    // The result pane reads ITS direction from the OUTPUT (the thumbnail is
+                    // the encoded file's own aspect): a batch standing on an empty pane has
+                    // no target frame to size from, and a portrait clip must not land in a
+                    // 16:9 box.
+                    outputW = th?.width ?: 0
+                    outputH = th?.height ?: 0
                     // AS IT FINISHES, not at the end. A batch is unattended by nature, and
                     // saving twelve clips only once the last one lands means a cancel or a
                     // crash at clip eleven loses ten that were already finished.
@@ -3584,18 +3798,21 @@ class MainActivity : ComponentActivity() {
                 }
                 // The COPY, not the output. A twelve-clip batch would otherwise leave
                 // twelve full-size videos in the cache behind the twelve it produced.
-                if (i > 0 && item.uri.scheme != "file")
+                if (item.uri.scheme != "file")
                     runCatching { File(cacheDir, "batch_" + (i + 1) + ".mp4").delete() }
             }
 
-            status = getString(R.string.status_batch_done, done, refused + failed)
-            appendLog("batch: %d done, %d refused, %d failed, %.1f s total"
-                .format(done, refused, failed, (System.currentTimeMillis() - t0) / 1000.0))
+            // 需求5: the count line says what actually happened, cancel included.
+            status = getString(R.string.status_batch_done, done, refused + failed + cancelledClips)
+            appendLog("batch: %d done, %d refused, %d failed, %d cancelled, %.1f s total"
+                .format(done, refused, failed, cancelledClips,
+                        (System.currentTimeMillis() - t0) / 1000.0))
             outputPartial = cancelRequested
             } finally {
                 NativePipe.release()
                 PipeGuard.release()
                 busy = false
+                runBatchUi = false
                 // Ends the notify thread, which stops the service itself.
                 BatchStatus.end()
                 BatchService.stop(this@MainActivity)

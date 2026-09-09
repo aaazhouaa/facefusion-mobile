@@ -354,6 +354,7 @@
     <string name="batch_refused">отклонено</string>
     <string name="batch_failed">ошибка</string>
     <string name="batch_skipped">пропущено</string>
+    <string name="batch_cancelled">отменено</string>
     <string name="batch_remove">Убрать из очереди</string>
     <string name="batch_unnamed_clip">клип</string>
     <string name="live_rec_start">Запись</string>
