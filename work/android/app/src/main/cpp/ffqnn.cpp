@@ -342,6 +342,20 @@ bool initBackend(const std::string& backendPath, const std::string& systemPath,
                  const std::string& skelDir) {
   if (g_be.ready) return true;
 
+  // Every failure below returns through failBackend so a half-started init cannot leak:
+  // the two dlopen'd libraries, the log handle and the backend handle are all process
+  // resources that would otherwise pin the .so files and the DSP session until the
+  // process dies. Power config is NOT touched here -- it cannot exist until the LAST
+  // step has run, and shutdown() owns that teardown.
+  auto failBackend = [](const std::string& m) {
+    if (g_be.backend && g_be.qnn.backendFree) g_be.qnn.backendFree(g_be.backend);
+    g_be.backend = nullptr;
+    if (g_be.log && g_be.qnn.logFree) { g_be.qnn.logFree(g_be.log); g_be.log = nullptr; }
+    if (g_be.libSystem) { dlclose(g_be.libSystem); g_be.libSystem = nullptr; }
+    if (g_be.libBackend) { dlclose(g_be.libBackend); g_be.libBackend = nullptr; }
+    return fail(m);
+  };
+
   // The Hexagon skel is found through ADSP_LIBRARY_PATH, which the fastrpc layer reads
   // when it is first loaded -- so this must happen BEFORE dlopen'ing the backend. The
   // exec'd version of this app got it from ProcessBuilder's environment; in-process
@@ -354,37 +368,37 @@ bool initBackend(const std::string& backendPath, const std::string& systemPath,
   g_be.libBackend = dlopen(backendPath.c_str(), RTLD_NOW | RTLD_LOCAL);
   if (!g_be.libBackend) return fail(std::string("dlopen backend: ") + dlerror());
   g_be.libSystem = dlopen(systemPath.c_str(), RTLD_NOW | RTLD_LOCAL);
-  if (!g_be.libSystem) return fail(std::string("dlopen system: ") + dlerror());
+  if (!g_be.libSystem) return failBackend(std::string("dlopen system: ") + dlerror());
 
   auto getProviders = (Qnn_ErrorHandle_t (*)(const QnnInterface_t***, uint32_t*))
       dlsym(g_be.libBackend, "QnnInterface_getProviders");
-  if (!getProviders) return fail("QnnInterface_getProviders not found");
+  if (!getProviders) return failBackend("QnnInterface_getProviders not found");
 
   const QnnInterface_t** providers = nullptr;
   uint32_t n = 0;
   if (getProviders(&providers, &n) != QNN_SUCCESS || n == 0)
-    return fail("QnnInterface_getProviders returned none");
+    return failBackend("QnnInterface_getProviders returned none");
   g_be.qnn = providers[0]->QNN_INTERFACE_VER_NAME;
 
   auto getSysProviders = (Qnn_ErrorHandle_t (*)(const QnnSystemInterface_t***, uint32_t*))
       dlsym(g_be.libSystem, "QnnSystemInterface_getProviders");
-  if (!getSysProviders) return fail("QnnSystemInterface_getProviders not found");
+  if (!getSysProviders) return failBackend("QnnSystemInterface_getProviders not found");
   const QnnSystemInterface_t** sysProviders = nullptr;
   uint32_t sn = 0;
   if (getSysProviders(&sysProviders, &sn) != QNN_SUCCESS || sn == 0)
-    return fail("QnnSystemInterface_getProviders returned none");
+    return failBackend("QnnSystemInterface_getProviders returned none");
   g_be.sys = sysProviders[0]->QNN_SYSTEM_INTERFACE_VER_NAME;
 
   if (g_be.qnn.logCreate) g_be.qnn.logCreate(qnnLog, QNN_LOG_LEVEL_WARN, &g_be.log);
 
   if (g_be.qnn.backendCreate(g_be.log, nullptr, &g_be.backend) != QNN_SUCCESS)
-    return fail("backendCreate failed");
+    return failBackend("backendCreate failed");
 
   // This is the call that failed with err 4000 when qnn-net-run was exec'd out of
   // the APK. In-process it succeeds, which is the whole point of this file.
   if (g_be.qnn.deviceCreate &&
       g_be.qnn.deviceCreate(g_be.log, nullptr, &g_be.device) != QNN_SUCCESS)
-    return fail("deviceCreate failed -- the DSP is not reachable from this process");
+    return failBackend("deviceCreate failed -- the DSP is not reachable from this process");
 
   // Burst clocks. Without this the HTP ramps lazily and every measured latency in
   // docs/ (which were all taken with --perf_profile burst) is unreproducible here.
@@ -494,6 +508,36 @@ bool bindTensors(Model* m, const QnnSystemContext_GraphInfo_t& gi) {
 
 namespace ffqnn {
 
+// Undo an initBackend that did not reach g_be.ready: every resource it created, in
+// reverse creation order. The handles (device, backend, log) are held by g_be and the
+// interface struct itself carries the release fns, so this covers every partial state
+// dlopen->systemContextCreate->backendCreate->deviceCreate can leave behind. powerId is
+// deliberately absent -- it is created in the LAST step of initBackend and released only
+// by shutdown(), the one place that knows the device will never execute again.
+void shutdown() {
+  std::lock_guard<std::mutex> lk(g_mu);
+  if (g_be.powerId && g_be.qnn.deviceGetInfrastructure) {
+    // The perf infra pointer comes from the device; must be torn down BEFORE deviceFree.
+    QnnDevice_Infrastructure_t infra{};
+    if (g_be.qnn.deviceGetInfrastructure(&infra) == QNN_SUCCESS) {
+      auto* htpInfra = (QnnHtpDevice_Infrastructure_t*)infra;
+      if (htpInfra && htpInfra->infraType == QNN_HTP_DEVICE_INFRASTRUCTURE_TYPE_PERF &&
+          htpInfra->perfInfra.destroyPowerConfigId &&
+          htpInfra->perfInfra.destroyPowerConfigId(g_be.powerId) == QNN_SUCCESS)
+        LOGI("power config %u released", g_be.powerId);
+    }
+    g_be.powerId = 0;
+  }
+  if (g_be.device && g_be.qnn.deviceFree) g_be.qnn.deviceFree(g_be.device);
+  g_be.device = nullptr;
+  if (g_be.backend && g_be.qnn.backendFree) g_be.qnn.backendFree(g_be.backend);
+  g_be.backend = nullptr;
+  if (g_be.log && g_be.qnn.logFree) { g_be.qnn.logFree(g_be.log); g_be.log = nullptr; }
+  if (g_be.libSystem) { dlclose(g_be.libSystem); g_be.libSystem = nullptr; }
+  if (g_be.libBackend) { dlclose(g_be.libBackend); g_be.libBackend = nullptr; }
+  g_be.ready = false;
+}
+
 const char* lastError() { return g_err.c_str(); }
 
 bool init(const std::string& backendLib, const std::string& systemLib,
@@ -546,19 +590,28 @@ Handle load(const std::string& binPath) {
   // Qnn_Tensor_t structs copied below is a POINTER into it.  So it must outlive the model:
   // freeing it here left every name dangling and execute() reported "no input named input"
   // for a graph whose input really is called `input`.  It is released in ffqnn::release.
-  if (g_be.sys.systemContextCreate(&m->sysCtx) != QNN_SUCCESS) {
-    munmap(map, (size_t)st.st_size); delete m; fail("systemContextCreate"); return nullptr;
-  }
+  // Every failure below happens AFTER at least one of the two handles exists, and the
+  // Model has no destructor of its own -- release() is the only place these are freed.
+  // Orphaning them is not a two-line leak: a bad tier binary calls load() once per
+  // candidate, and each abandoned system context pins the graph's deserialised metadata
+  // (plus whatever VTCM/DDR the deserialiser reserved) until the process is killed.
+  auto failLoad = [&](const std::string& msg, bool alreadyReported) -> Handle {
+    munmap(map, (size_t)st.st_size);
+    if (m->context) g_be.qnn.contextFree(m->context, nullptr);
+    if (m->sysCtx) g_be.sys.systemContextFree(m->sysCtx);
+    delete m;
+    if (!alreadyReported) fail(msg);
+    return nullptr;
+  };
+
+  if (g_be.sys.systemContextCreate(&m->sysCtx) != QNN_SUCCESS)
+    return failLoad("systemContextCreate", false);
   if (g_be.sys.systemContextGetBinaryInfo(m->sysCtx, map, (uint64_t)st.st_size, &info,
-                                          &infoSize) != QNN_SUCCESS || !info) {
-    munmap(map, (size_t)st.st_size); delete m;
-    fail("systemContextGetBinaryInfo"); return nullptr;
-  }
+                                          &infoSize) != QNN_SUCCESS || !info)
+    return failLoad("systemContextGetBinaryInfo", false);
   if (g_be.qnn.contextCreateFromBinary(g_be.backend, g_be.device, nullptr, map,
-                                       (uint64_t)st.st_size, &m->context, nullptr) != QNN_SUCCESS) {
-    munmap(map, (size_t)st.st_size); delete m;
-    fail("contextCreateFromBinary " + binPath); return nullptr;
-  }
+                                       (uint64_t)st.st_size, &m->context, nullptr) != QNN_SUCCESS)
+    return failLoad("contextCreateFromBinary " + binPath, false);
 
   const QnnSystemContext_GraphInfo_t* graphs = nullptr;
   uint32_t nGraphs = 0;
@@ -572,16 +625,14 @@ Handle load(const std::string& binPath) {
   if (nGraphs != 1) {
     // Every binary this project converts holds exactly one graph; more than one means
     // the wrong file was pushed.
-    munmap(map, (size_t)st.st_size); delete m;
-    fail(binPath + ": expected 1 graph, found " + std::to_string(nGraphs));
-    return nullptr;
+    return failLoad(binPath + ": expected 1 graph, found " + std::to_string(nGraphs), false);
   }
   bool ok = bindTensors(m, graphs[0]);
+  if (!ok) return failLoad("", /*alreadyReported=*/true);
 
   // The context has deserialised into its own storage, so the MAPPING can go -- but the
   // system context cannot (see above).
   munmap(map, (size_t)st.st_size);
-  if (!ok) { delete m; return nullptr; }
   LOGI("loaded %s (%.2f MB, %zu in, %zu out)", binPath.c_str(), st.st_size / 1048576.0,
        m->inputs.size(), m->outputs.size());
   return (Handle)m;

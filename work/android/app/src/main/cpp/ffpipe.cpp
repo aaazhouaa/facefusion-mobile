@@ -139,6 +139,13 @@ struct Pipeline::Impl {
   bool haveSource = false;
   std::vector<std::array<float, 512>> sourceSlots;
   int activeSource = 0;
+  // Owns the model handles. Pipeline::init() replaces the Impl wholesale
+  // (p_.reset(new Impl())), so a second init on the same pipeline would otherwise leak
+  // every model loaded by the first -- the handles live here and are released here.
+  ~Impl() {
+    for (auto h : {n.det, n.fan, n.fan685, n.arc, n.swap, n.lip, n.nsfw, n.enh})
+      if (h) ffnn::release(h);
+  }
   struct FaceAssignment { std::array<float, 512> embedding; int source = -1; bool disabled = false; };
   std::vector<FaceAssignment> faceAssignments;
   // One person currently in the live frame, matched frame to frame by box overlap
@@ -254,13 +261,7 @@ struct Pipeline::Impl {
 
 Pipeline::Pipeline() = default;
 
-Pipeline::~Pipeline() {
-  if (p_) {
-    for (auto h : {p_->n.det, p_->n.fan, p_->n.fan685, p_->n.arc, p_->n.swap, p_->n.lip, p_->n.nsfw,
-                   p_->n.enh})
-      if (h) ffnn::release(h);
-  }
-}
+Pipeline::~Pipeline() = default;
 
 bool Pipeline::init(const std::string& libDir, const std::string& skelDir,
                     const std::string& modelDir, const std::string& swapperName,
@@ -701,6 +702,18 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame, bool boxesOnly,
   }
 
   // [1,20,8400] -> per-anchor (cx,cy,w,h, score, 5x(x,y,vis))
+  //
+  // The fixed-stride parse below has no guard of its own -- every read is a hard index --
+  // so a binary whose output shape does not match (wrong tier, truncated download) would
+  // walk off the heap. The lip syncer checks its output the same way further down; this
+  // path never did.
+  const size_t kDetElems = (size_t)20 * 8400;
+  if (out.empty() || out[0].size() < kDetElems) {
+    err_ = "detector: output has " +
+           std::to_string(out.empty() ? 0 : out[0].size()) + " elements, expected " +
+           std::to_string(kDetElems);
+    return faces;
+  }
   t0 = nowMs();
   const int A = 8400;
   const float* d = out[0].data();
@@ -742,7 +755,8 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame, bool boxesOnly,
     float lm68_5[136];
     if (p_->n.fan685) {
       std::vector<std::vector<float>> o5;
-      if (ffnn::execute(p_->n.fan685, {"input"}, {f.landmark5}, o5) && o5[0].size() >= 136)
+      if (ffnn::execute(p_->n.fan685, {"input"}, {f.landmark5}, o5) &&
+          !o5.empty() && o5[0].size() >= 136)
         std::memcpy(lm68_5, o5[0].data(), sizeof(lm68_5));
       else
         std::memset(lm68_5, 0, sizeof(lm68_5));
@@ -795,6 +809,12 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame, bool boxesOnly,
     msLandmark += nowMs() - t0;
 
     t0 = nowMs();
+    // decodeHeatmaps strides a fixed 68x64x64 out of the vector with no bounds check of
+    // its own; a wrong-shaped fan output would read past it.
+    if (hm.empty() || hm[0].size() < (size_t)68 * 64 * 64) {
+      err_ = "landmarker: unexpected output size";
+      return faces;
+    }
     float xy[136], peak[68];
     ffcv::decodeHeatmaps(hm[0].data(), 68, 64, 64, xy, peak);
     for (int k = 0; k < 68; ++k) { xy[2 * k] = xy[2 * k] / 64.f * MS; xy[2 * k + 1] = xy[2 * k + 1] / 64.f * MS; }
@@ -866,6 +886,12 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame, bool boxesOnly,
     }
     msRecognise += nowMs() - t0;
 
+    // 512 floats are copied out by constant size, so a shorter output would read past the
+    // end of the heap buffer.
+    if (emb.empty() || emb[0].size() < 512) {
+      err_ = "recogniser: unexpected output size";
+      return faces;
+    }
     std::memcpy(f.embedding, emb[0].data(), sizeof(f.embedding));
     double nrm = 0;
     for (int i = 0; i < 512; ++i) nrm += (double)f.embedding[i] * f.embedding[i];
@@ -983,6 +1009,17 @@ int Pipeline::addSource(const ffcv::Image& img) {
   for (const auto& f : faces) {
     float a = (f.box[2] - f.box[0]) * (f.box[3] - f.box[1]);
     if (a > area) { area = a; best = &f; }
+  }
+  // One slot per source face the UI can select between. The Live screen has no upper
+  // bound on the picker, so this guards native memory instead of trusting the UI: each
+  // slot is 2 KB of embeddings, and every slot is re-scored against every tracked face
+  // every frame, so an unbounded list is both a leak-like grow and a per-frame drag.
+  // 16 tracks the LIVE tracker's own cap (kMaxTracked), and there is no Assign-per-
+  // person flow that needs more sources than faces it can track.
+  const int kMaxSourceSlots = 16;
+  if ((int)p_->sourceSlots.size() >= kMaxSourceSlots) {
+    err_ = "too many source faces (max " + std::to_string(kMaxSourceSlots) + ")";
+    return -1;
   }
   std::array<float, 512> slot{};
   std::memcpy(slot.data(), best->embeddingNorm, sizeof(float) * 512);
@@ -1363,7 +1400,18 @@ bool Pipeline::updateLiveTracking(const std::vector<Face>& faces,
                 return t.missed >= (t.pinned ? kAssignDropPinned : kAssignDropUnpinned);
               }),
             trk.end());
-  while (trk.size() > (size_t)kMaxTracked) trk.pop_back();
+
+  // The trim pops from the TAIL, and a tail entry is exactly what the NEW-face pass just
+  // appended and pointed faceTrack at: one frame detecting more faces than kMaxTracked
+  // trims entries created THIS frame and leaves faceTrack indexing past the end. A wild
+  // read there is not only a crash -- the garbage TrackedFace would pin a random face to
+  // a random source. Invalidate the references as each entry is dropped.
+  while (trk.size() > (size_t)kMaxTracked) {
+    const size_t dropped = trk.size() - 1;
+    for (size_t i = 0; i < faceTrack.size(); ++i)
+      if (faceTrack[i] == (int)dropped) faceTrack[i] = -1;
+    trk.pop_back();
+  }
 
   // The per-face source table for swapAll: pinned faces keep THEIR source, everyone
   // else keeps the frozen default -- NOT the active slot. The active slot is what the
@@ -1371,7 +1419,14 @@ bool Pipeline::updateLiveTracking(const std::vector<Face>& faces,
   // and no face changes until one is tapped.
   p_->frameSources.resize(faces.size());
   for (size_t i = 0; i < faces.size(); ++i) {
-    const Pipeline::Impl::TrackedFace& t = trk[(size_t)faceTrack[i]];
+    // faceTrack[i] is -1 for a face whose fresh entry the kMaxTracked trim dropped;
+    // such a face is not tracked this frame, so it follows the frozen default.
+    const int ti = faceTrack[i];
+    if (ti < 0 || (size_t)ti >= trk.size()) {
+      p_->frameSources[i] = p_->assignDefaultSource;
+      continue;
+    }
+    const Pipeline::Impl::TrackedFace& t = trk[(size_t)ti];
     p_->frameSources[i] = t.pinned ? t.source : p_->assignDefaultSource;
   }
   return tapSource >= 0 && (tappedEntry >= 0 || tappedFace >= 0);
@@ -1664,6 +1719,12 @@ bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
       msSwap += nowMs() - t0;
 
       t0 = nowMs();
+      // Same guard as every other model read in this file: a wrong-shaped binary output
+      // would walk off the heap at the fixed-stride copy below.
+      if (so.empty() || so[0].size() < (size_t)3 * SS * SS) {
+        err_ = "swapper: unexpected output size";
+        return false;
+      }
       const float* o = so[0].data();
       for (int y = 0; y < SS; ++y) {
         float* orow = outCrop.row(y * PB + ty);
@@ -1752,6 +1813,12 @@ bool Pipeline::enhance(ffcv::Image& frame, const std::vector<Face>& faces) {
       msEnhance += nowMs() - t0;
 
       t0 = nowMs();
+      // Same guard as every other model read in this file: a wrong-sized enhancer output
+      // would be read past the end of the heap buffer below.
+      if (eo.empty() || eo[0].size() < (size_t)3 * ES * ES) {
+        err_ = "enhancer: unexpected output size";
+        return false;
+      }
       const float* e = eo[0].data();
       for (int y = 0; y < ES; ++y) {
         float* erow = enhCrop.row(y * EPB + ty);

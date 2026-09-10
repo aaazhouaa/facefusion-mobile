@@ -118,3 +118,7 @@ work/android/keystore.properties
 # and which would sit in every clone of the history for ever.
 media/source/
 work/local.properties
+
+# Local tooling, never commit
+local.properties
+.codegraph/

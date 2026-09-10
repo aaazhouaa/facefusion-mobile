@@ -7,6 +7,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 
 #include "ffqnn.h"
 
@@ -38,6 +39,12 @@ DeviceInfo ncnnDeviceInfo();
 #endif
 
 namespace {
+// Serialises the state globals below. execute/release/outputShapes/inputNames/inputShapes
+// NEVER take it: they dispatch off the HANDLE (HandleRec::backend), not off g_active, and
+// must not be made to wait on anything state-like -- execute is the per-frame hot path.
+// Lock order: this mutex, then ffqnn's internal g_mu; ffqnn never calls back up here, so
+// there is no cycle.
+std::mutex g_stateMu;
 Backend g_active = Backend::Qnn;
 bool g_ready = false;
 
@@ -75,6 +82,7 @@ bool init(Backend b, const InitSpec& spec) {
     if (init(Backend::Qnn, spec)) return true;
     return init(Backend::Ncnn, spec);
   }
+  std::lock_guard<std::mutex> lk(g_stateMu);
   g_active = b;
   switch (b) {
     case Backend::Qnn:
@@ -96,12 +104,16 @@ bool init(Backend b, const InitSpec& spec) {
   return false;
 }
 
-Backend active() { return g_active; }
+Backend active() {
+  std::lock_guard<std::mutex> lk(g_stateMu);
+  return g_active;
+}
 
 Handle open(const std::string& logicalName, Placement p) {
   // Placement is accepted and ignored on QNN rather than rejected: on this backend every
   // graph runs on the HTP, so "pin to CPU" is already satisfied in the only sense that
   // matters -- there is no less-safe unit to be pinned away from.
+  std::lock_guard<std::mutex> lk(g_stateMu);
   if (!g_ready) return nullptr;
   Handle inner = nullptr;
   switch (g_active) {
@@ -168,6 +180,7 @@ std::vector<std::vector<int>> inputShapes(Handle h) {
 }
 
 const char* lastError() {
+  std::lock_guard<std::mutex> lk(g_stateMu);
   switch (g_active) {
     case Backend::Qnn: return qnnLastError();
 #ifdef FFNN_HAVE_NCNN
@@ -210,6 +223,7 @@ std::vector<std::string> variantChain(Backend b) {
 }
 
 bool variantPresent(const std::string& v) {
+  std::lock_guard<std::mutex> lk(g_stateMu);
   switch (g_active) {
     case Backend::Qnn: return qnnVariantPresent(v);
 #ifdef FFNN_HAVE_NCNN
@@ -223,12 +237,25 @@ bool variantPresent(const std::string& v) {
 }
 
 void useVariant(const std::string& v) {
+  std::lock_guard<std::mutex> lk(g_stateMu);
   if (g_active == Backend::Qnn) qnnUseTier(v);
 }
 
 const std::string& variant() {
+  std::lock_guard<std::mutex> lk(g_stateMu);
   static const std::string none;
   return g_active == Backend::Qnn ? qnnTier() : none;
+}
+
+void deinit() {
+  std::lock_guard<std::mutex> lk(g_stateMu);
+  // Tear the backend down to its pre-init state -- power config, log, device, backend and
+  // the dlopen'd libraries, in reverse creation order. A later init() rebuilds all of it.
+  // Nothing on the ncnn side holds process resources outside the per-model handles, which
+  // the pipeline has already released by the time this is reachable. Idempotent.
+  g_ready = false;
+  g_active = Backend::Auto;
+  ffqnn::shutdown();
 }
 
 }  // namespace ffnn

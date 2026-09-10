@@ -135,4 +135,11 @@ bool variantPresent(const std::string& v);
 void useVariant(const std::string& v);
 const std::string& variant();
 
+// Tear the started backend down to its pre-init state, releasing its process-level
+// resources (QNN: power config, log, device, backend, dlopen'd libraries). Idempotent;
+// a later init() rebuilds everything. A convenience for a caller that owns the whole
+// process lifecycle -- nothing in the app calls this today; the Android process reaps
+// everything on exit and a teardown between runs would only slow the next one down.
+void deinit();
+
 }  // namespace ffnn

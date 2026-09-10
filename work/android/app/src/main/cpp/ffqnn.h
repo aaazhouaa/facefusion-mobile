@@ -20,6 +20,14 @@ namespace ffqnn {
 bool init(const std::string& backendLib, const std::string& systemLib,
           const std::string& skelDir);
 
+// Tear the backend down to its pre-init state: power config, log, device, backend and the
+// dlopen'd libraries, in reverse creation order. Idempotent, safe to call whether or not
+// init() ever succeeded; correct to call only when no model handle is still alive (the
+// pipeline releases its handles before this becomes reachable). Nothing in the app shells
+// this today -- the OS reaps a dying process -- it exists so a failed init CANNOT leak and
+// a full teardown has a home.
+void shutdown();
+
 // A context binary, kept resident.  Loading is the expensive part (76 ms for hyperswap's
 // 196 MB), so models are loaded once and reused across frames.
 using Handle = void*;

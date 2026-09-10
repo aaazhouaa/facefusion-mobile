@@ -10,9 +10,11 @@
 #include <jni.h>
 #include <android/bitmap.h>
 
+#include <atomic>
 #include <cmath>
 #include <cstdio>    // snprintf, for stageMillis
 #include <cstdlib>   // setenv/unsetenv, for setForcedBackend
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -54,34 +56,56 @@ std::vector<float> g_refEmbedding;
  * fully-written request, and it clears it before anything else, so a request is
  * consumed exactly once.
  */
-struct AssignRequest { volatile bool pending = false; float x = 0; float y = 0; int source = -1; };
+// Cross-thread: requestFaceAssignment runs on the UI thread, the consumer in liveFrame on
+// the camera/analyzer thread. Each pair is a flag + payload; the flag is atomic, the
+// payload is written BEFORE the release-store that publishes it and read AFTER the
+// acquire-load that consumes it, so `pending`/`consumed` also carry the payload across.
+struct AssignRequest { std::atomic<bool> pending{false}; float x = 0; float y = 0; int source = -1; };
 // `consumed` is set on EVERY consumed request (matched or not), so the caller can tell
 // "still in flight" from "consumed and missed" -- the distinction a wall-clock timeout
 // gets wrong when a frame is slow. `have` means it matched.
-struct AssignResult { volatile bool consumed = false; volatile bool have = false;
+struct AssignResult { std::atomic<bool> consumed{false}; std::atomic<bool> have{false};
                       float box[4]{}; int source = -1; };
 static AssignRequest g_assignReq;
 static AssignResult g_assignResult;
 // RAW -> DISPLAY scale of the live frame, written every liveFrame and read by
 // takeSelectionBox (called from the shot callback, outside liveFrame, which is the one
 // place that knows both sizes).
-static float g_scaleX = 1.f, g_scaleY = 1.f;
+static std::atomic<float> g_scaleX{1.f}, g_scaleY{1.f};
 // Mirror of the pipeline's assign flag, read by liveFrame to pick the analysis mode:
 // assign mode forces a FRESH detection (noTrack) instead of the tracker's reconstructed
 // boxes -- a tap and the per-person tracking both need the truth about where faces are,
 // and the reconstructed box jumps at detector boundaries, which is exactly the jitter
 // that made taps miss and associations churn.
-static bool g_assignEnabled = false;
+static std::atomic<bool> g_assignEnabled{false};
 
 std::string jstr(JNIEnv* env, jstring s) {
   if (!s) return {};
   const char* c = env->GetStringUTFChars(s, nullptr);
-  std::string out(c ? c : "");
+  // GetStringUTFChars fails only on OOM; when it does there is no buffer to release and
+  // handing null to ReleaseStringUTFChars is a JNI violation (UB, a crash on some runtimes).
+  if (!c) return {};
+  std::string out(c);
   env->ReleaseStringUTFChars(s, c);
   return out;
 }
 
 inline uint8_t clamp8(int v) { return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v)); }
+
+// Frame-size gate shared by every entry that builds an ffcv::Image from caller bytes:
+// a wild w/h makes Image allocate w*h*3 (the int product itself can overflow), and
+// GetByteArrayRegion past the array's end throws an exception that would unwind straight
+// out of C++ into an undefined JNI state. Called on the SUCCESS path too; it is two
+// comparisons.
+static bool frameOk(JNIEnv* env, jbyteArray jBgr, int w, int h, const char* who) {
+  if (w <= 0 || h <= 0 || (int64_t)w * h > (int64_t)(64 * 1024 * 1024)) {
+    g_err = std::string(who) + ": bad frame size"; return false;
+  }
+  if ((size_t)env->GetArrayLength(jBgr) != (size_t)w * h * 3) {
+    g_err = std::string(who) + ": frame is not w*h*3 bytes"; return false;
+  }
+  return true;
+}
 
 /**
  * The per-frame tunables, clamped, into `cfg`.
@@ -229,7 +253,7 @@ JNIEXPORT void JNICALL
 Java_com_facefusion_mobile_NativePipe_requestFaceAssignment(JNIEnv*, jclass,
                                                             jfloat x, jfloat y, jint source) {
   g_assignReq.x = (float)x; g_assignReq.y = (float)y; g_assignReq.source = (int)source;
-  g_assignReq.pending = true;    // LAST: the consumer reads a fully-written request only
+  g_assignReq.pending.store(true, std::memory_order_release);   // LAST: publishes x/y/source
 }
 
 // The result of the last CONSUMED request, exactly once: FIVE floats (x0, y0, x1, y1,
@@ -239,14 +263,14 @@ Java_com_facefusion_mobile_NativePipe_requestFaceAssignment(JNIEnv*, jclass,
 // well past any wall-clock timeout, so Kotlin never guesses between those two).
 JNIEXPORT jfloatArray JNICALL
 Java_com_facefusion_mobile_NativePipe_takeAssignmentResult(JNIEnv* env, jclass) {
-  if (!g_assignResult.consumed) return env->NewFloatArray(0);
-  g_assignResult.consumed = false;
-  if (!g_assignResult.have) {
+  if (!g_assignResult.consumed.load(std::memory_order_acquire)) return env->NewFloatArray(0);
+  g_assignResult.consumed.store(false, std::memory_order_release);
+  if (!g_assignResult.have.load(std::memory_order_acquire)) {
     jfloatArray miss = env->NewFloatArray(1);
     if (miss) { float m = -1.0f; env->SetFloatArrayRegion(miss, 0, 1, &m); }
     return miss;
   }
-  g_assignResult.have = false;
+  g_assignResult.have.store(false, std::memory_order_release);
   jfloatArray out = env->NewFloatArray(5);
   if (out) {
     float five[5] = {g_assignResult.box[0], g_assignResult.box[1],
@@ -261,8 +285,9 @@ Java_com_facefusion_mobile_NativePipe_takeAssignmentResult(JNIEnv* env, jclass) 
 // exactly what the user asked for when they turn the feature off.
 JNIEXPORT void JNICALL
 Java_com_facefusion_mobile_NativePipe_setFaceAssignEnabled(JNIEnv*, jclass, jboolean enabled) {
-  g_assignEnabled = enabled == JNI_TRUE;
-  if (g_pipe) g_pipe->setFaceAssignEnabled(g_assignEnabled);
+  const bool on = enabled == JNI_TRUE;
+  g_assignEnabled.store(on, std::memory_order_release);
+  if (g_pipe) g_pipe->setFaceAssignEnabled(on);
 }
 
 // The SELECTED person (assign mode): the last one tapped, who follows the source chip
@@ -277,8 +302,9 @@ Java_com_facefusion_mobile_NativePipe_takeSelectionBox(JNIEnv* env, jclass) {
   if (!g_pipe->selectedFaceBox(raw, &source)) return env->NewFloatArray(0);
   jfloatArray out = env->NewFloatArray(5);
   if (out) {
-    float five[5] = {raw[0] * g_scaleX, raw[1] * g_scaleY,
-                     raw[2] * g_scaleX, raw[3] * g_scaleY, (float)source};
+    const float sx = g_scaleX.load(std::memory_order_acquire);
+    const float sy = g_scaleY.load(std::memory_order_acquire);
+    float five[5] = {raw[0] * sx, raw[1] * sy, raw[2] * sx, raw[3] * sy, (float)source};
     env->SetFloatArrayRegion(out, 0, 5, five);
   }
   return out;
@@ -320,11 +346,8 @@ JNIEXPORT jfloat JNICALL
 Java_com_facefusion_mobile_NativePipe_contentScore(JNIEnv* env, jclass, jbyteArray jBgr,
                                                    jint w, jint h) {
   if (!g_pipe) { g_err = "pipeline not initialised"; return NAN; }
+  if (!frameOk(env, jBgr, w, h, "contentScore")) return NAN;
   ffcv::Image img(w, h, 3);
-  if ((size_t)env->GetArrayLength(jBgr) != img.data.size()) {
-    g_err = "contentScore: frame is not w*h*3 bytes";
-    return NAN;
-  }
   env->GetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
   ffpipe::ContentVerdict v = g_pipe->checkContent(img);
   if (!v.ok) { g_err = g_pipe->error(); return NAN; }
@@ -622,6 +645,7 @@ JNIEXPORT jboolean JNICALL
 Java_com_facefusion_mobile_NativePipe_setSource(JNIEnv* env, jclass, jbyteArray jBgr,
                                                 jint w, jint h) {
   if (!g_pipe) { g_err = "pipeline not initialised"; return JNI_FALSE; }
+  if (!frameOk(env, jBgr, w, h, "setSource")) return JNI_FALSE;
   ffcv::Image img(w, h, 3);
   env->GetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
   if (!g_pipe->setSource(img)) { g_err = g_pipe->error(); return JNI_FALSE; }
@@ -632,6 +656,7 @@ JNIEXPORT jint JNICALL
 Java_com_facefusion_mobile_NativePipe_addSource(JNIEnv* env, jclass, jbyteArray jBgr,
                                                 jint w, jint h) {
   if (!g_pipe) { g_err = "pipeline not initialised"; return -1; }
+  if (!frameOk(env, jBgr, w, h, "addSource")) return -1;
   ffcv::Image img(w, h, 3);
   env->GetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
   return (jint)g_pipe->addSource(img);
@@ -660,6 +685,7 @@ JNIEXPORT jint JNICALL
 Java_com_facefusion_mobile_NativePipe_processFrame(JNIEnv* env, jclass, jbyteArray jBgr,
                                                    jint w, jint h) {
   if (!g_pipe) { g_err = "pipeline not initialised"; return -1; }
+  if (!frameOk(env, jBgr, w, h, "processFrame")) return -1;
   ffcv::Image img(w, h, 3);
   env->GetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
   auto faces = g_pipe->analyse(img);
@@ -721,6 +747,7 @@ JNIEXPORT jint JNICALL
 Java_com_facefusion_mobile_NativePipe_processFrameAt(JNIEnv* env, jclass, jbyteArray jBgr,
                                                      jint w, jint h, jint frameIndex) {
   if (!g_pipe) { g_err = "pipeline not initialised"; return -1; }
+  if (!frameOk(env, jBgr, w, h, "processFrameAt")) return -1;
   ffcv::Image img(w, h, 3);
   env->GetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
   auto faces = g_pipe->analyse(img);
@@ -1057,7 +1084,8 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
   // optimisation that jitters at detector boundaries, and both the tap hit-test and the
   // per-person association need accurate boxes. Costs one yoloface per frame while the
   // mode is on -- the price of the feature being correct.
-  auto faces = g_pipe->analyse(frame, /*boxesOnly=*/false, /*noTrack=*/g_assignEnabled);
+  auto faces = g_pipe->analyse(frame, /*boxesOnly=*/false,
+                               /*noTrack=*/g_assignEnabled.load(std::memory_order_acquire));
 
   // Assignment taps, consumed HERE on the PRE-SWAP detections: the identity pinned is
   // the real person's, not the swapped result the display will draw. The tap arrives in
@@ -1065,14 +1093,10 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
   // coordinates, so it is mapped across by the frame's own scale -- the one piece of
   // geometry only this function knows. consumed is set whether or not the tap hit a
   // face: a miss must be reported, not left hanging.
-  const bool tapPending = g_assignReq.pending;
-  if (tapPending) {
-    g_assignReq.pending = false;
-    g_assignResult.consumed = true;
-    g_assignResult.have = false;
-  }
+  const bool tapPending = g_assignReq.pending.exchange(false, std::memory_order_acq_rel);
   const int dw = dstW > 0 ? (int)dstW : w, dh = dstH > 0 ? (int)dstH : h;
-  g_scaleX = (float)dw / (float)w; g_scaleY = (float)dh / (float)h;
+  g_scaleX.store((float)dw / (float)w, std::memory_order_release);
+  g_scaleY.store((float)dh / (float)h, std::memory_order_release);
   // updateLiveTracking runs on EVERY live frame: it is the per-frame bookkeeping that
   // makes an assignment STICKY (faces are associated by box, never re-scored against
   // the assignments), and it pins the tapped face so the swap on THIS very frame
@@ -1084,15 +1108,21 @@ Java_com_facefusion_mobile_NativePipe_liveFrame(JNIEnv* env, jclass,
       tapPending ? g_assignReq.y * (float)h / (float)dh : 0.f,
       tapPending ? (int)g_assignReq.source : -1,
       tapBox);
-  if (tapPending && tapped) {
-    g_assignResult.have = true;
-    // Back into display space, so the overlay can draw the box without knowing the
-    // sensor size.
-    g_assignResult.box[0] = tapBox[0] * (float)dw / (float)w;
-    g_assignResult.box[1] = tapBox[1] * (float)dh / (float)h;
-    g_assignResult.box[2] = tapBox[2] * (float)dw / (float)w;
-    g_assignResult.box[3] = tapBox[3] * (float)dh / (float)h;
-    g_assignResult.source = (int)g_assignReq.source;
+  if (tapPending) {
+    // Payload FIRST, flag LAST: the consumer's acquire load of `consumed` must
+    // happen-before its reads of box/have/source, or a slow UI read could see a miss
+    // result -- have still false -- while the payload is mid-write.
+    g_assignResult.have.store(tapped, std::memory_order_release);
+    if (tapped) {
+      // Back into display space, so the overlay can draw the box without knowing the
+      // sensor size.
+      g_assignResult.box[0] = tapBox[0] * (float)dw / (float)w;
+      g_assignResult.box[1] = tapBox[1] * (float)dh / (float)h;
+      g_assignResult.box[2] = tapBox[2] * (float)dw / (float)w;
+      g_assignResult.box[3] = tapBox[3] * (float)dh / (float)h;
+      g_assignResult.source = (int)g_assignReq.source;
+    }
+    g_assignResult.consumed.store(true, std::memory_order_release);
   }
 
   if (!faces.empty()) {
