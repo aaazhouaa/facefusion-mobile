@@ -19,6 +19,7 @@
 
     <string name="nav_swap">換臉</string>
     <string name="nav_settings">設定</string>
+    <string name="topbar_toggle_theme">切換亮色或暗色主題</string>
     <string name="nav_live">實況</string>
 
     <string name="swap_source_face">來源人臉</string>
@@ -351,11 +352,6 @@
     <string name="set_tab_device">裝置</string>
     <string name="set_tab_api">API</string>
     <string name="set_tab_about">關於</string>
-    <string name="set_theme_title">主題</string>
-    <string name="set_theme_dark">深色模式</string>
-    <string name="set_theme_follow_system">跟隨系統</string>
-    <string name="set_theme_desc_dark">深色</string>
-    <string name="set_theme_desc_light">淺色</string>
     <string name="live_lens_front">前鏡頭</string>
     <string name="live_lens_back">後鏡頭</string>
     <string name="swap_show_faces">顯示偵測到的臉孔</string>

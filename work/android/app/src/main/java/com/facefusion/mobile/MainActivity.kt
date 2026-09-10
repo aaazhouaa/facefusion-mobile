@@ -347,6 +347,16 @@ class MainActivity : ComponentActivity() {
      * [ThemePrefs] so the choice survives a restart.
      */
     private var darkTheme by mutableStateOf<Boolean?>(null)
+
+    /**
+     * The one write path for the manual theme choice -- the top-bar sun/moon lands
+     * here, so the composed state and the disk copy ([ThemePrefs]) cannot drift apart.
+     */
+    private fun pinTheme(dark: Boolean) {
+        darkTheme = dark
+        ThemePrefs.save(this, dark)
+    }
+
     private var confirmMetered by mutableStateOf(false)
 
     /**
@@ -1193,6 +1203,9 @@ class MainActivity : ComponentActivity() {
                     // path had no content gate -- and that reason is gone: the camera is
                     // sampled in LiveEngine and the source is checked where it is picked.
                     showLive = true,
+                    // The sun/moon at the right edge of the brand band. Same write path
+                    // as the Settings switch -- [pinTheme], persisted via ThemePrefs.
+                    onToggleTheme = ::pinTheme,
                 ) { pad ->
                     Box(Modifier.padding(pad)) {
                         when (screen) {
@@ -1465,14 +1478,6 @@ class MainActivity : ComponentActivity() {
                                 onForceBackend =
                                     if (NativePipe.hasNcnnBackend()) ::onForceBackend
                                     else null,
-                                // The manual theme choice (null = follow the system) and
-                                // the switch that makes one. Saved immediately so a restart
-                                // keeps it -- see ThemePrefs.
-                                darkTheme = darkTheme,
-                                onSetTheme = { dark ->
-                                    darkTheme = dark
-                                    ThemePrefs.save(this@MainActivity, dark)
-                                },
                             )
                             }
                         }

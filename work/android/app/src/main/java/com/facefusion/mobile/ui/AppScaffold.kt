@@ -1,7 +1,9 @@
 package com.facefusion.mobile.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Settings
@@ -13,7 +15,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.facefusion.mobile.R
@@ -35,6 +39,9 @@ fun AppScaffold(
     screen: Screen,
     onScreen: (Screen) -> Unit,
     showLive: Boolean = false,
+    // Pin the manual theme: the argument is the mode to switch TO (true = dark).
+    // Same write path as the Settings switch -- [com.facefusion.mobile.ui.ThemePrefs].
+    onToggleTheme: (Boolean) -> Unit,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     Scaffold(
@@ -74,13 +81,36 @@ fun AppScaffold(
                     // In dark mode the brand band is fainter -- the mark and the wordmark
                     // read as chrome rather than content, and the header should not
                     // out-shout the tiles under it on a dark theme.
-                    val brandAlpha =
-                        if (MaterialTheme.colorScheme.background.luminance() < 0.5f) 0.69f else 1f
+                    val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+                    val brandAlpha = if (isDark) 0.69f else 1f
                     AppMark(size = 23.dp, modifier = Modifier.alpha(brandAlpha))
                     Wordmark(
                         Modifier.weight(1f),
                         color = MaterialTheme.colorScheme.onBackground.copy(alpha = brandAlpha),
                     )
+                    // Theme toggle at the right edge of the band, level with the mark:
+                    // a plain sun/moon. The icon shows the DESTINATION -- dark shows the
+                    // sun (tap goes light), light shows the moon (tap goes dark), the
+                    // same reading as the system quick tile. A 28dp round hit area rather
+                    // than an IconButton: Material3's minimum touch target (40dp) would
+                    // grow this row and with it the band, which 21e67d0 tuned by hand.
+                    Box(
+                        Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .clickable { onToggleTheme(!isDark) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            painterResource(
+                                if (isDark) R.drawable.ic_theme_sun
+                                else R.drawable.ic_theme_moon
+                            ),
+                            contentDescription = stringResource(R.string.topbar_toggle_theme),
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onBackground.copy(alpha = brandAlpha),
+                        )
+                    }
                 }
             }
         },
