@@ -416,6 +416,10 @@
     <string name="batch_skipped">skipped</string>
     <string name="batch_cancelled">cancelled</string>
     <string name="batch_remove">Remove from queue</string>
+    <string name="batch_clear_desc">Clear the batch queue</string>
+    <string name="batch_clear_title">Clear the batch</string>
+    <string name="batch_clear_body">This drops all %1$d queued clips and their renders.</string>
+    <string name="batch_clear_confirm">Clear</string>
     <string name="batch_unnamed_clip">clip</string>
     <string name="swap_output_settings">Output settings</string>
     <string name="swap_output_summary">%1$s, %2$s fps</string>

@@ -372,6 +372,10 @@
     <string name="batch_skipped">已略過</string>
     <string name="batch_cancelled">已取消</string>
     <string name="batch_remove">從佇列移除</string>
+    <string name="batch_clear_desc">清空批次佇列</string>
+    <string name="batch_clear_title">清空批次佇列</string>
+    <string name="batch_clear_body">將刪除佇列中全部 %1$d 個片段及其產生的結果。</string>
+    <string name="batch_clear_confirm">清空</string>
     <string name="batch_unnamed_clip">片段</string>
     <string name="live_rec_start">錄製</string>
     <string name="live_rec_stop">停止錄製</string>

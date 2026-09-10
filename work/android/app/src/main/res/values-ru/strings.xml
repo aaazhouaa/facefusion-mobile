@@ -352,6 +352,10 @@
     <string name="batch_skipped">пропущено</string>
     <string name="batch_cancelled">отменено</string>
     <string name="batch_remove">Убрать из очереди</string>
+    <string name="batch_clear_desc">Очистить очередь пакета</string>
+    <string name="batch_clear_title">Очистить пакет</string>
+    <string name="batch_clear_body">Будут удалены все %1$d клипов из очереди и их результаты.</string>
+    <string name="batch_clear_confirm">Очистить</string>
     <string name="batch_unnamed_clip">клип</string>
     <string name="live_rec_start">Запись</string>
     <string name="live_rec_stop">Остановить запись</string>

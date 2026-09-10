@@ -245,6 +245,9 @@ class MainActivity : ComponentActivity() {
     /** A queue row whose render would be lost; see [removeFromBatch]. */
     private var confirmBatchDelete by mutableStateOf<Int?>(null)
 
+    /** The whole queue's renders would be lost; see [clearBatch]. */
+    private var confirmBatchClear by mutableStateOf(false)
+
     /**
      * The targets waiting behind the visible one -- roadmap 14.
      *
@@ -1388,6 +1391,14 @@ class MainActivity : ComponentActivity() {
                                         confirmBatchDelete = i
                                     else removeFromBatch(i)
                                 },
+                                onClearBatch = {
+                                    // Same confirmation rule as the single row: ask only
+                                    // when real renders would be lost -- finished rows that
+                                    // auto-save has not already put in the gallery.
+                                    if (batchQueue.any { it.output != null && !opts.batchAutoSave })
+                                        confirmBatchClear = true
+                                    else clearBatch()
+                                },
                                 onCancel = {
                                     cancelRequested = true
                                     status = getString(R.string.status_cancelling)
@@ -1531,6 +1542,25 @@ class MainActivity : ComponentActivity() {
                             },
                             dismissButton = {
                                 TextButton({ confirmBatchDelete = null }) {
+                                    Text(stringResource(R.string.proc_get_cancel))
+                                }
+                            },
+                        )
+                    }
+
+                    if (confirmBatchClear) {
+                        AlertDialog(
+                            onDismissRequest = { confirmBatchClear = false },
+                            title = { Text(stringResource(R.string.batch_clear_title)) },
+                            text = { Text(stringResource(R.string.batch_clear_body, batchQueue.size)) },
+                            confirmButton = {
+                                TextButton({ clearBatch() }) {
+                                    Text(stringResource(R.string.batch_clear_confirm),
+                                         color = MaterialTheme.colorScheme.error)
+                                }
+                            },
+                            dismissButton = {
+                                TextButton({ confirmBatchClear = false }) {
                                     Text(stringResource(R.string.proc_get_cancel))
                                 }
                             },
@@ -2938,6 +2968,34 @@ class MainActivity : ComponentActivity() {
             return
         }
         startLive()
+    }
+
+    /**
+     * Clear the WHOLE batch queue -- the trash at the card's bottom-right corner.
+     *
+     * The bulk twin of [removeFromBatch]: every row's render is deleted, the result
+     * pane steps off whatever render it was showing, and a pane holding a queued clip
+     * clears with the queue -- there is no successor left to promote into it, so it
+     * goes blank rather than showing a clip that no longer exists.
+     */
+    private fun clearBatch() {
+        if (busy) return
+        confirmBatchClear = false
+        // Both known BEFORE the wipe, because the wipe steps both panes off what they
+        // hold: the result pane may be sitting on one of the renders about to be
+        // deleted, and the target pane may be showing one of the queued clips.
+        val wasShown = batchQueue.any { it.output != null && it.output == outputFile }
+        val paneHeldQueuedClip = batchQueue.any { it.source != null && it.source == targetSourceUri }
+        val queuedSources = batchQueue.mapNotNull { it.source }
+        batchQueue.forEach { item -> item.output?.let { runCatching { it.delete() } } }
+        batchQueue = emptyList()
+        if (wasShown) {
+            outputFile = null; savedUri = null; savedPathLabel = null
+            outputW = 0; outputH = 0
+        }
+        // The pane's "last pick" records all point at rows that no longer exist.
+        lastTargetPicks = lastTargetPicks.filterNot { it in queuedSources }
+        if (paneHeldQueuedClip) clearTargetFramesOnly()
     }
 
     /**

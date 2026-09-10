@@ -194,6 +194,8 @@ fun SwapScreen(
     batch: List<BatchItem>,
     /** Drop a queued clip. Only offered while it is still waiting. */
     onRemoveFromBatch: (Int) -> Unit,
+    /** Clear the WHOLE batch queue -- the trash at the card's bottom-right corner. */
+    onClearBatch: () -> Unit,
     /** Add more clips to the queue, leaving the visible target alone. */
     onAddToBatch: () -> Unit,
     /** Show a finished batch clip in the output pane, by its index in [batch]. */
@@ -981,6 +983,20 @@ fun SwapScreen(
                     Text(stringResource(R.string.batch_autosave),
                          style = MaterialTheme.typography.bodySmall,
                          fontSize = 11.sp)
+                }
+                // 清空全部，"批量添加"元素自身（标题行 trailing）的右端——不在内容
+                // 区里。16dp 图标；队列空时不透明度降到 69%（降 31%），读作"没有
+                // 可清的东西"，但仍占着位置。
+                IconButton(
+                    onClearBatch,
+                    enabled = idle && batch.isNotEmpty(),
+                    modifier = Modifier.size(16.dp),
+                ) {
+                    Icon(Icons.Default.Delete,
+                         stringResource(R.string.batch_clear_desc),
+                         Modifier.size(16.dp),
+                         tint = MaterialTheme.colorScheme.onSurfaceVariant
+                             .copy(alpha = if (batch.isEmpty()) 0.69f else 1f))
                 }
             },
         ) {
