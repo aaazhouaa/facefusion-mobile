@@ -260,6 +260,15 @@ class MainActivity : ComponentActivity() {
      */
     private var batchQueue by mutableStateOf<List<BatchItem>>(emptyList())
     /**
+     * 上一次"添加目标"（目标窗格 pick）入队的片段 uri。
+     *
+     * 用户报告：跑完一次换脸后再"添加目标"，旧目标还挂在队列里，按钮变成
+     * "替换 n 个片段"。目标窗格的 pick 语义是"我要换这个"——新 pick 覆盖上一次
+     * pick 入队的条目，而不是无限追加。+ tile（批量添加）显式排队的条目不属于
+     * 这里，照常保留；垃圾桶与批量行的删除会同步清理这份记录。
+     */
+    private var lastTargetPicks: List<Uri> = emptyList()
+    /**
      * True from the moment a batch STARTS until its rows are reset for the next one.
      *
      * 需求5: `busy` drops back the instant the loop unwinds, and a cancelled batch's
@@ -372,6 +381,21 @@ class MainActivity : ComponentActivity() {
     private val previews = PreviewEngine()
     private var originalFrame by mutableStateOf<Bitmap?>(null)
     private var swappedFrame by mutableStateOf<Bitmap?>(null)
+    /**
+     * 目标版本戳，标记 [swappedFrame]/[preview] 属于哪一版"添加目标"的内容。
+     *
+     * 这两个状态曾是"输出画面"——删除批量首行后的回退（loadTarget keepOutput=true）与
+     * 单个输出的窗格接管都靠它们留存画面，于是换目标后残留的旧帧一直显示：用户看到
+     * "换脸结果"还是上一个目标的换脸。改为绑定 targetVersion：赋值处记版本，显示处
+     * 经 [staleSwapped] 校验（不匹配即作废），保存处取帧前经 [dropStaleSwappedFrame]
+     * 校验。输出文件（outputFile）本身不绑定——文件是独立产物，保留。
+     */
+    private var swappedFrameOwner by mutableStateOf<Int?>(null)
+    /** [preview]（run 的实时帧）所属的目标版本，语义同 [swappedFrameOwner]。 */
+    private var previewOwner by mutableStateOf<Int?>(null)
+    /** [swappedFrame] 是否属于当前目标：版本戳不匹配即过期，窗格显示回落到 [preview]。 */
+    private fun staleSwapped(): Boolean =
+        swappedFrame != null && swappedFrameOwner != targetVersion
     /**
      * 目标窗格的固定帧。
      *
@@ -661,6 +685,13 @@ class MainActivity : ComponentActivity() {
         // 需求6: the pick no longer WIPES the queue. The queue is its own artifact --
         // whatever the user queued through the + tile survives a target change; the
         // picks below are APPENDED (deduped), never a reset.
+        //
+        // 用户 bug 报告：跑完一次换脸后再"添加目标"，旧目标留在队列里，按钮变成
+        // "替换 n 个片段"。目标窗格的 pick 语义是"覆盖我上一次放的目标"：先把
+        // 上一次窗格 pick 入队的条目从队列摘掉（+ tile 显式排队的保留），再入队
+        // 这次的选择。re-pick 同一个片段时先摘后加，位置刷新但只此一份。
+        if (lastTargetPicks.isNotEmpty())
+            batchQueue = batchQueue.filterNot { it.source in lastTargetPicks }
         loadTarget(uris.first())
         // ⚠ VIDEOS ONLY, and the first pick decides whether there is a queue at all.
         //
@@ -691,6 +722,8 @@ class MainActivity : ComponentActivity() {
                 BatchItem(it, displayName(it) ?: getString(R.string.batch_unnamed_clip),
                           source = it)
             }).distinctBy { it.uri }
+            // 本窗格入队的这批成为"上一次窗格 pick"，下次窗格 pick 时被覆盖（见上）。
+            lastTargetPicks = videos
             seedBatchThumbs(videos, start)
             if (images > 0)
                 status = getString(R.string.status_batch_queued_some, videos.size, images)
@@ -1190,7 +1223,14 @@ class MainActivity : ComponentActivity() {
                                     // meant the pane emptied itself the instant the swap
                                     // finished and sat on "Preparing preview..." for good --
                                     // nothing re-warms a pipeline the finished run released.
-                                    swapped = if (busy) preview else (swappedFrame ?: preview),
+                                    //
+                                    // swappedFrame/preview 各自绑定所属目标
+                                    // （swappedFrameOwner/previewOwner）：版本戳对不上当前
+                                    // targetVersion 的帧是上一个目标的换脸，不得显示——
+                                    // 换目标后两者皆空，即占位符。
+                                    swapped = if (busy) preview
+                                              else (swappedFrame?.takeIf { swappedFrameOwner == targetVersion }
+                                                    ?: preview?.takeIf { previewOwner == targetVersion }),
                                     timeLabel = if (durationMs > 0) fmt(previewAtMs) else "",
                                     warm = previewWarm,
                                     busy = previewBusy,
@@ -1224,7 +1264,8 @@ class MainActivity : ComponentActivity() {
                                 onToggleCard = { k -> openCard = if (openCard == k) "" else k },
                                 // A still needs no run, so it has no output FILE -- what
                                 // there is to save is the pane itself.
-                                hasOutput = if (targetImage != null) swappedFrame != null
+                                hasOutput = if (targetImage != null)
+                                                swappedFrame != null && !staleSwapped()
                                             else outputFile != null,
                                 outputFile = outputFile,
                                 outputW = outputW,
@@ -1980,9 +2021,41 @@ class MainActivity : ComponentActivity() {
      *    in the one path that did not call it.
      */
     private fun clearPreviewFrames() {
+        droppedSwappedFrameJob?.cancel()
+        droppedSwappedFrameJob = null
+        droppedSwappedFrame = null
         swappedFrame = null
+        swappedFrameOwner = null
+        previewOwner = null
         previewNote = null
         preview = null
+    }
+
+    /**
+     * [swappedFrame] 过期时把帧移交 [droppedSwappedFrame] 而不是丢弃。
+     *
+     * 为什么留一拍：写盘尚未发生时（刚跑完一个输出、还没点过任何保存），用户点
+     * "换脸结果"上的 Save 存的就是这帧。直接置 null 会让一个合法的保存变成
+     * "Nothing to save"；移交给 [droppedSwappedFrame] 后，Save 用它完成落盘，而窗格
+     * 显示层永不读它——不会出现旧目标的画面挂在新目标旁边。任何一个存动作发生时
+     * （[saveSwappedStill]/[savePreviewFrame]）即清空，跨目标不会累积。
+     */
+    private var droppedSwappedFrame: Bitmap? = null
+    private var droppedSwappedFrameJob: Job? = null
+    private fun dropStaleSwappedFrame(): Bitmap? {
+        droppedSwappedFrameJob?.cancel(); droppedSwappedFrameJob = null
+        val stale = staleSwapped()
+        if (stale) {
+            droppedSwappedFrame = swappedFrame
+            droppedSwappedFrameJob = lifecycleScope.launch {
+                delay(10_000)
+                droppedSwappedFrame = null
+                droppedSwappedFrameJob = null
+        }
+        }
+        val keep = if (stale) droppedSwappedFrame else swappedFrame
+        if (stale) swappedFrame = null
+        return keep
     }
 
     /**
@@ -2204,16 +2277,20 @@ class MainActivity : ComponentActivity() {
                 android.util.Log.d("ffpreview", "  swapped faces=" + out.faces +
                                                 " err=" + out.error)
                 when {
-                    out.error != null -> { previewNote = out.error; swappedFrame = null }
+                    out.error != null -> { previewNote = out.error; swappedFrame = null; swappedFrameOwner = null }
                     out.faces == 0 -> {
                         // processFrame leaves the buffer untouched when it finds nothing, so
                         // without this the pane would show the ORIGINAL and look like a
                         // swap that did nothing.
                         previewNote = getString(R.string.status_no_face)
-                        swappedFrame = null
+                        swappedFrame = null; swappedFrameOwner = null
                     }
                     else -> {
-                        swappedFrame = out.bitmap; previewNote = null
+                        // 盖上当前目标的版本戳：这帧换脸属于刚校验过的 targetVersion，
+                        // 换目标/换批量首项后版本变，此帧即被判过期（见 staleSwapped）。
+                        swappedFrame = out.bitmap
+                        swappedFrameOwner = targetVersion
+                        previewNote = null
                         // For a still this pane IS the result, so a new one is a different
                         // image from the one the Save button reported saving.
                         if (targetImage != null) { savedUri = null; savedPathLabel = null }
@@ -2383,15 +2460,26 @@ class MainActivity : ComponentActivity() {
                 // 目标窗格的固定帧 = 首帧。片段滑条 seek 的是 originalFrame，不碰这里，
                 // 所以"添加目标"的缩略图不随滑条变化。
                 paneFallback = originalFrame
+                // 保持显示：源脸已载入且管线热时，旧目标的预览刚被清掉（或即将因版本戳
+                // 被显示层作废），这里立刻为新目标重排一次刷新——冷管线会自动放弃，
+                // 不花模型重载；不调度则窗格要等一次手动 seek/刷新按钮才回内容。
+                if (sourceUri != null && previewWarm && !busy) refreshSwapped(force = false)
                 // 需求1: "添加目标"的内容同步展示在"批量添加"里。The pane's pick is
                 // reflected in the queue -- but only when the queue does not hold it
                 // already: pickTarget queues every pick itself (with the source tag),
                 // and a re-pick of a queued clip must not move it to the end.
+                //
+                // 这条兜底入队服务的是不经 pickTarget 的窗格目标（相机拍摄视频等）。
+                // 它同样是"目标窗格 pick 落进队列"，必须记入 lastTargetPicks，否则
+                // 拍完 A、跑一次、再拍 B 时 A 不会被覆盖（同一 bug 的拍摄路径）。
+                // pickTarget 已入队时这里跳过，lastTargetPicks 保持整批 videos 不动。
                 targetSourceUri?.let { src ->
-                    if (batchQueue.none { it.source == src })
+                    if (batchQueue.none { it.source == src }) {
                         batchQueue = batchQueue + listOf(BatchItem(src,
                             targetName ?: getString(R.string.batch_unnamed_clip),
                             source = src))
+                        lastTargetPicks = lastTargetPicks + listOf(src)
+                    }
                 }
             }.onFailure {
                 status = getString(R.string.status_cannot_read_video, it.message ?: "")
@@ -2435,6 +2523,8 @@ class MainActivity : ComponentActivity() {
             originalFrame = bmp
             // 目标窗格的固定帧（见 paneFallback）：图片目标没有滑条，但语义一致。
             paneFallback = bmp
+            // 保持显示：同视频路径（见上）。图片目标的刷新走 warm 路径，成本低。
+            if (sourceUri != null && previewWarm && !busy) refreshSwapped(force = false)
             status = getString(R.string.status_target_ready_image, bmp.width, bmp.height)
             preparing = false
         }
@@ -2796,6 +2886,9 @@ class MainActivity : ComponentActivity() {
         // removeFromBatch() fallback path. Only a fully-emptied queue leaves the pane
         // blank, and that blank is then true.
         if (queuedFrom != null) {
+            // 垃圾桶把窗格行摘掉了：同步清掉"上一次窗格 pick"记录，否则下次窗格
+            // pick 会去摘一条已经不在队列里的 uri（无害，但记录会撒谎）。
+            lastTargetPicks = lastTargetPicks.filterNot { it == queuedFrom }
             val nextPane = batchQueue.firstOrNull { it.source != null }
             if (nextPane != null)
                 loadTarget(nextPane.source!!, keepOutput = true)
@@ -2904,6 +2997,9 @@ class MainActivity : ComponentActivity() {
         // then reloaded -- and only an emptied queue leaves the pane blank.
         val paneHeldDeletedRow = item.source != null && item.source == targetSourceUri
         if (paneHeldDeletedRow) {
+            // 批量行删除摘掉的正是窗格当前持有的行：同步清掉"上一次窗格 pick"
+            // 记录（见垃圾桶处）。
+            lastTargetPicks = lastTargetPicks.filterNot { it == item.source }
             val nextPane = batchQueue.firstOrNull { it.source != null }
             if (nextPane != null) {
                 // keepOutput: the result pane's file state and picture belong to the
@@ -2941,7 +3037,10 @@ class MainActivity : ComponentActivity() {
                             }
                         }.getOrNull()
                     } ?: return@launch
+                    // 这帧取自 successor 的输出文件，而 promote 的 loadTarget 已把
+                    // targetVersion 指向它——盖上当前版本戳，保持"帧随目标"。
                     swappedFrame = bmp
+                    swappedFrameOwner = targetVersion
                 }
             }
         }
@@ -3467,6 +3566,9 @@ class MainActivity : ComponentActivity() {
                                 val ph = (h.toLong() * pw / w).toInt().coerceAtLeast(1)
                                 val argb = NativePipe.bgrToArgb(bgr, w, h, pw, ph)
                                 preview = Bitmap.createBitmap(argb, pw, ph, Bitmap.Config.ARGB_8888)
+                                // run 的帧属于 run 的目标；盖上当前版本戳，避免 run 与
+                                // 一次 stale 回落之间的窗口里被误判为旧目标残留。
+                                previewOwner = targetVersion
                             }
                         },
                         onLog = { appendLog(it) },
@@ -3750,6 +3852,8 @@ class MainActivity : ComponentActivity() {
                                     preview = Bitmap.createBitmap(
                                         NativePipe.bgrToArgb(bgr, w, h, pw, ph),
                                         pw, ph, Bitmap.Config.ARGB_8888)
+                                    // 同单目标 run：盖当前版本戳（run 中 targetVersion 不变）。
+                                    previewOwner = targetVersion
                                 }
                             },
                             onLog = { appendLog(it) },
@@ -3958,7 +4062,7 @@ class MainActivity : ComponentActivity() {
      * anything the gate has not already passed.
      */
     private fun saveSwappedStill() {
-        val bmp = swappedFrame ?: return
+        val bmp = dropStaleSwappedFrame() ?: return
         lifecycleScope.launch {
             val name = "facefusion_%d.png".format(System.currentTimeMillis())
             val r = withContext(Dispatchers.IO) {
@@ -3995,7 +4099,7 @@ class MainActivity : ComponentActivity() {
      * scaled-down thing being displayed.
      */
     private fun savePreviewFrame() {
-        val bmp = swappedFrame ?: preview ?: return
+        val bmp = dropStaleSwappedFrame() ?: preview ?: return
         lifecycleScope.launch {
             val stem = targetName?.substringBeforeLast('.')?.take(40) ?: "facefusion"
             // The timestamp only means something for a video; a still has exactly one frame
