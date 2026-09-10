@@ -850,39 +850,41 @@ fun SwapScreen(
         // The result of the swap gets a full-width pane of its own, sized from the TARGET.
         // The pane fills the available width; its height follows the target's aspect ratio
         // capped so a tall target never eats the screen.
-        val maxPaneW = (screenW - 64).dp
+        // 方向三级回退：输出文件自身（runBatch/onOpenBatchOutput 从输出缩略图记录，同比例）
+        // → 目标窗格第一帧 → targetAspect。批量跑在空窗格上时目标帧不存在，旧实现直接
+        // 落到 16:9 的 paneHeight，竖屏输出被压成横向小条，读不出方向。
+        val tW = outputW.takeIf { it > 0 } ?: preview.original?.width ?: 0
+        val tH = outputH.takeIf { it > 0 } ?: preview.original?.height ?: 0
+        // 横向结果用 pair 窗格的宽度（upstream 的 before/after pair 按整列排，screenW-32）
+        // —— upstream 的"换脸结果"看起来更大，差的就是这 32dp。竖向保持更窄的 screenW-64：
+        // 竖向的高度上限已经把盒子压窄，宽再放开会把 Swap 按钮挤出首屏。
+        //
+        // 需求⑤：宽与高互相钳制，盒子比例恒等于片段自身的比例。旧实现只钳高：maxResultH
+        // 的 180dp 下限在分屏/小窗的矮窗口里生效后，宽 = 高 × 比例 可能反超列宽，盒子
+        // 溢出列外——"小窗里换脸结果比例不对"就是它。现在超宽则回推高度，两个方向都不越界。
+        val resultAspect = when {
+            tW > 0 && tH > 0 -> tW.toFloat() / tH.toFloat()   // width / height
+            !hasTarget && targetAspect > 0f -> targetAspect
+            // 需求①：空态呈现"有横向内容时的样子"——固定按 16:9 的横向宽扁盒取尺寸，
+            // 不再借用 paneHeight（那是目标窗格的高度预算，空态盒因此显得又窄又高）。
+            else -> 16f / 9f
+        }
+        val maxPaneW = if (resultAspect >= 1f) (screenW - 32).dp else (screenW - 64).dp
         // ⚠ The result pane's height has a CEILING, or a tall target eats the screen:
         // a tall portrait frame scaled to full width would be taller than a phone.
         // The pane used to size itself freely, and the Swap button -- everything below
         // the pane, really -- slid off the first screen; the button was still THERE and
         // still clickable at the edge of the fold, it just could not be seen.
         val maxResultH = (screenH - 460).dp.coerceIn(180.dp, 420.dp)
-        // 方向三级回退：输出文件自身（runBatch/onOpenBatchOutput 从输出缩略图记录，同比例）
-        // → 目标窗格第一帧 → targetAspect。批量跑在空窗格上时目标帧不存在，旧实现直接
-        // 落到 16:9 的 paneHeight，竖屏输出被压成横向小条，读不出方向。
-        val tW = outputW.takeIf { it > 0 } ?: preview.original?.width ?: 0
-        val tH = outputH.takeIf { it > 0 } ?: preview.original?.height ?: 0
-        val resultH: Dp
-        if (tW > 0 && tH > 0) {
-            val aspect = tW.toFloat() / tH.toFloat()   // width / height
-            var h = maxPaneW / aspect
-            if (h > maxResultH) {
-                h = maxResultH
-            }
-            resultH = h
-        } else {
-            resultH = paneHeight.coerceAtMost(maxResultH)
+        var h = maxPaneW / resultAspect
+        if (h > maxResultH) h = maxResultH
+        var wResult: Dp = h * resultAspect
+        if (wResult > maxPaneW) {
+            wResult = maxPaneW
+            h = wResult / resultAspect
         }
-        // The image box matches the image's OWN aspect ratio: a portrait result is no
-        // longer letterboxed into grey side bars by a full-width box. The column stays
-        // full width; contentWidth centres the (narrower) box inside it. When neither the
-        // output nor the pane has a frame to read, the remembered target aspect still
-        // shapes the box -- a portrait clip must never fall back to a full-width box.
-        val resultW: Dp? = when {
-            tW > 0 && tH > 0 -> resultH * (tW.toFloat() / tH.toFloat())
-            targetAspect > 0f -> resultH * targetAspect
-            else -> null
-        }
+        val resultH: Dp = h
+        val resultW: Dp? = wResult
 
         // Always shown by default. The placeholder reads as a call to action until the
         // inputs exist, and once they do it is the after half of the before/after.

@@ -342,10 +342,12 @@ fun PreviewPane(
         modifier
             .clip(RoundedCornerShape(18.dp))
             .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 6.dp, vertical = 5.dp)
+            // 需求③：顶部收紧。5→3 dp，标签行自身的 bottom 4→2（下方）——图片盒与
+            // 容器顶部之间的总空隙小了 4 dp，"子元素离父元素顶部太远"的观感来源。
+            .padding(start = 6.dp, end = 6.dp, top = 3.dp, bottom = 5.dp)
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(start = 4.dp, bottom = 4.dp),
+            Modifier.fillMaxWidth().padding(start = 4.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // A badge rather than a bare caption: the label names the pane, and a small
@@ -443,11 +445,12 @@ fun PreviewPane(
                                         // PANE COORDINATES BACK TO IMAGE COORDINATES, in
                                         // the reverse order they were applied: undo the
                                         // zoom layer (scale about the box's centre, then
-                                        // translate), then undo ContentScale.Fit's
-                                        // letterbox. Getting this backwards does not throw
-                                        // -- it picks a face a few dozen pixels from the
-                                        // one under the finger, which is indistinguishable
-                                        // from a bad detector.
+                                        // translate), then undo Crop's uniform cover scale
+                                        // (k = max of the two ratios, no offset -- sub-pixel
+                                        // overflow only). Getting this backwards does not
+                                        // throw -- it picks a face a few dozen pixels from
+                                        // the one under the finger, which is
+                                        // indistinguishable from a bad detector.
                                         var picked = false
                                         val boxes = faceBoxes
                                         if (onPickFace != null && boxes != null &&
@@ -461,9 +464,9 @@ fun PreviewPane(
                                                                 zoom.offset.x) / z
                                             val uy = bh / 2f + (tap.y - bh / 2f -
                                                                 zoom.offset.y) / z
-                                            val k = minOf(bw / iw, bh / ih)
-                                            val ix = (ux - (bw - iw * k) / 2f) / k
-                                            val iy = (uy - (bh - ih * k) / 2f) / k
+                                            val k = maxOf(bw / iw, bh / ih)
+                                            val ix = ux / k
+                                            val iy = uy / k
                                             for (i in 0 until boxes.size / 5) {
                                                 val b = i * 5
                                                 if (ix >= boxes[b] && ix <= boxes[b + 2] &&
@@ -499,7 +502,10 @@ fun PreviewPane(
                                 translationY = zoom.offset.y
                             } else Modifier
                         ),
-                    contentScale = ContentScale.Fit,
+                    // 等比覆盖（Crop）：盒子比例已按内容精确推导，与图像仅差亚像素；
+                    // Crop 等比缩放到恰好铺满，溢出的亚像素边缘被圆角裁掉——既无 Fit 的
+                    // 1~2 px 灰缝，也无 FillBounds 的变形。
+                    contentScale = ContentScale.Crop,
                 )
                 if (faceBoxes != null && faceBoxes.size >= 5) {
                     // The SAME graphicsLayer as the Image above, so the outlines pan and
@@ -516,18 +522,14 @@ fun PreviewPane(
                                 } else Modifier
                             )
                     ) {
-                        // ContentScale.Fit, recomputed rather than guessed: uniform scale
-                        // to the smaller ratio, then centred. Getting this wrong does not
-                        // fail loudly -- it draws rectangles that are slightly off the
+                        // ContentScale.Crop 语义（等比覆盖）：k 取两方向比例的较大值
+                        // （等比放大到恰好覆盖盒子），无居中偏移。Getting this wrong does
+                        // not fail loudly -- it draws rectangles that are slightly off the
                         // faces, which reads as a bad detector.
                         val iw = bitmap.width.toFloat()
                         val ih = bitmap.height.toFloat()
                         if (iw > 0f && ih > 0f) {
-                            val k = minOf(size.width / iw, size.height / ih)
-                            val ox = (size.width - iw * k) / 2f
-                            val oy = (size.height - ih * k) / 2f
-                            // 2 dp at scale 1, thinned as the pane zooms in so the stroke
-                            // stays the same width on screen instead of growing into a slab.
+                            val k = maxOf(size.width / iw, size.height / ih)
                             val w = 2.dp.toPx() / (zoom?.scale ?: 1f)
                             for (i in 0 until faceBoxes.size / 5) {
                                 val b = i * 5
@@ -543,8 +545,8 @@ fun PreviewPane(
                                     color = if (chosen) FfRed
                                             else FfRed.copy(alpha =
                                                 if (referenceBox != null) 0.35f else 1f),
-                                    topLeft = Offset(ox + faceBoxes[b] * k,
-                                                     oy + faceBoxes[b + 1] * k),
+                                    topLeft = Offset(faceBoxes[b] * k,
+                                                     faceBoxes[b + 1] * k),
                                     size = Size((faceBoxes[b + 2] - faceBoxes[b]) * k,
                                                 (faceBoxes[b + 3] - faceBoxes[b + 1]) * k),
                                     style = Stroke(width = if (chosen) w * 2f else w),
@@ -860,6 +862,46 @@ private fun FaceTileFilled(
 }
 
 /**
+ * 横向留白修复（等比覆盖，与 PreviewPane 的 ContentScale.Crop 同一语义）：framework
+ * [VideoView] 的 onMeasure 按视频比例做 fitCenter 收缩——盒子比例与解码报告的比例有
+ * 亚像素出入（Dp 取整、旋转元数据）就在盒内留下 1~2 px 的灰缝。onPrepared 后 Compose
+ * 层写入视频真实像素尺寸（[videoW]/[videoH]），onMeasure 改用与 Crop 相同的公式等比
+ * 放大到恰好覆盖盒子（宽比大则铺宽、高比大则铺高），MediaPlayer 把帧拉到 view 尺寸
+ * 即等比、无变形；溢出的亚像素边缘被父盒子已有的圆角 clip 裁掉。每次布局 pass 都
+ * 重算，滚动返回/旋转后自愈，不依赖 super 收缩结果的精度。
+ */
+private class CoverVideoView(ctx: android.content.Context) : VideoView(ctx) {
+    /** 解码报告的视频像素尺寸，onPrepared 后写入；未知时退回 super 的 fitCenter。 */
+    var videoW = 0
+    var videoH = 0
+
+    override fun onMeasure(widthSpec: Int, heightSpec: Int) {
+        super.onMeasure(widthSpec, heightSpec)
+        if (android.view.View.MeasureSpec.getMode(widthSpec) ==
+                android.view.View.MeasureSpec.EXACTLY &&
+            android.view.View.MeasureSpec.getMode(heightSpec) ==
+                android.view.View.MeasureSpec.EXACTLY &&
+            videoW > 0 && videoH > 0
+        ) {
+            val boxW = android.view.View.MeasureSpec.getSize(widthSpec)
+            val boxH = android.view.View.MeasureSpec.getSize(heightSpec)
+            val vAspect = videoW.toFloat() / videoH
+            val bAspect = boxW.toFloat() / boxH
+            // ContentScale.Crop 公式：scale = max(盒宽/视频宽, 盒高/视频高)。
+            // 视频比盒子更宽扁 → 以高度铺满、宽度等比溢出；更高窄 → 铺满宽、高度溢出。
+            val w: Int
+            val h: Int
+            if (vAspect > bAspect) {
+                h = boxH; w = (boxH * vAspect + 0.5f).toInt()
+            } else {
+                w = boxW; h = (boxW / vAspect + 0.5f).toInt()
+            }
+            setMeasuredDimension(w.coerceAtLeast(boxW), h.coerceAtLeast(boxH))
+        }
+    }
+}
+
+/**
  * The finished video, playable in place, with a scrub bar and a Save frame button.
  *
  * Framework [VideoView] rather than media3/ExoPlayer. One pane does not justify a player
@@ -901,7 +943,8 @@ fun OutputPane(
 
     Column(modifier.fillMaxWidth()) {
         Row(
-            Modifier.fillMaxWidth().padding(bottom = 4.dp),
+            // 需求③：与 PreviewPane 同步收紧，4→2 dp。
+            Modifier.fillMaxWidth().padding(bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Caption(stringResource(if (partial) R.string.out_output_partial
@@ -942,10 +985,19 @@ fun OutputPane(
             key(file.absolutePath) {
             AndroidView(
                 factory = { ctx ->
-                    VideoView(ctx).apply {
+                    // 横向留白修复：等比覆盖而非 fitCenter/拉伸（见 [CoverVideoView]）。
+                    CoverVideoView(ctx).apply {
                         setVideoPath(file.absolutePath)
                         setOnPreparedListener { mp ->
                             durationMs = mp.duration
+                            // 覆盖测量需要的视频真实像素尺寸。handler 里触发 requestLayout：
+                            // onPrepared 异步于首次布局，而布局 pass 中直接 requestLayout
+                            // 会抛 CalledFromWrongThreadException。
+                            if (mp.videoWidth > 0 && mp.videoHeight > 0) {
+                                videoW = mp.videoWidth
+                                videoH = mp.videoHeight
+                                post { requestLayout() }
+                            }
                             // Seek off zero so the pane shows the first frame instead of
                             // black while paused.
                             seekTo(1)
