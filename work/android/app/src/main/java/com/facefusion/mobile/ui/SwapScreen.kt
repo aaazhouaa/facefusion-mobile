@@ -36,6 +36,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import com.facefusion.mobile.displayThumb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
@@ -735,13 +736,22 @@ fun SwapScreen(
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
+                // The tile is a 72 dp square -- it never needs more than a couple of
+                // hundred pixels of the original. Drawing the full 4096-edge frame (a
+                // 64 MB ARGB bitmap) into that square on every scroll pass is half the
+                // "page scrolls janky after a swap" report. Downscale for display;
+                // `preview.original` itself keeps the full resolution for the pipeline
+                // and the output-size math below.
+                val originalDisplay = remember(preview.original) {
+                    preview.original?.displayThumb(256)?.first
+                }
                 FaceTile(
                     // The tile names what it holds: TARGET while asking for one, ORIGINAL once
                     // it is showing the source frame. The timestamp is dropped here -- the
                     // tile's badge is a 9 sp plate, and a clock string does not survive that.
                     label = stringResource(if (hasTarget) R.string.swap_pane_original
                                            else R.string.swap_pane_target),
-                    bitmap = preview.original,
+                    bitmap = originalDisplay,
                     placeholder = stringResource(when {
                         run.preparing -> R.string.swap_reading_video
                         hasTarget -> R.string.swap_seeking
@@ -893,10 +903,22 @@ fun SwapScreen(
         //
         // `modelsMissing` keeps the download overlay reachable on a fresh install: it
         // lives on this pane because it is the one that cannot draw without the models.
+        //
+        // ⚠ DISPLAY THUMBNAIL: the pipeline frame is up to 1920 on the long edge (an
+        // 8 MB ARGB bitmap) and the pane renders it at roughly the width of the screen --
+        // every scroll pass uploads and samples the full thing. The pane only DRAWS what
+        // it is given, so the swap result is downscaled for display here; the full
+        // `swappedFrame` still lives in the Activity state and is what Save writes.
+        // `remember` keys on the bitmap, so the scale happens once per frame, not on
+        // every recomposition during a scroll. This is the fix for "the page scrolls
+        // janky after a swap".
+        val swappedDisplay = remember(preview.swapped) {
+            preview.swapped?.displayThumb()?.first
+        }
         PreviewPane(
             label = stringResource(R.string.swap_pane_swapped),
             height = resultH,
-            bitmap = preview.swapped,
+            bitmap = swappedDisplay,
             placeholder = when {
                 modelsMissing -> ""
                 // Already a finished, localized sentence from the Activity -- notably
@@ -1047,8 +1069,9 @@ fun SwapScreen(
                             contentAlignment = Alignment.Center,
                         ) {
                             if (item.thumb != null) {
+                                val image = remember(item.thumb) { item.thumb.asImageBitmap() }
                                 Image(
-                                    item.thumb!!.asImageBitmap(), null,
+                                    image, null,
                                     Modifier
                                         .fillMaxSize()
                                         .clip(RoundedCornerShape(6.dp)),

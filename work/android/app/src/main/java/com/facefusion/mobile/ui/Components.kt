@@ -1,7 +1,6 @@
 package com.facefusion.mobile.ui
 
 import android.graphics.Bitmap
-import android.widget.VideoView
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -490,8 +489,14 @@ fun PreviewPane(
             contentAlignment = Alignment.Center,
         ) {
             if (bitmap != null) {
+                // Cache the ImageBitmap wrapper: asImageBitmap() allocates a new
+                // object on every recomposition, and this pane recomposes on the
+                // scroll pass -- the wrapper churn alone is GC pressure during a
+                // drag. remember(bitmap) keys on the underlying Bitmap, so a stable
+                // frame wraps exactly once.
+                val image = remember(bitmap) { bitmap.asImageBitmap() }
                 Image(
-                    bitmap.asImageBitmap(), label,
+                    image, label,
                     Modifier
                         .fillMaxSize()
                         .then(
@@ -701,8 +706,9 @@ fun FaceTile(
                     // FULL-BLEED, no inset: the bitmap covers the whole 72 dp square. The
                     // square's own clip rounds the image, so there is no frame, no border
                     // and no margin left around it -- the picture IS the content square.
+                    val image = remember(bitmap) { bitmap.asImageBitmap() }
                     Image(
-                        bitmap.asImageBitmap(), label,
+                        image, label,
                         Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop,
                     )
@@ -814,8 +820,9 @@ private fun FaceTileFilled(
         // surface. Only the content itself stretches to the row's leftover width.
         Row(verticalAlignment = Alignment.Bottom) {
             if (bitmap != null) {
+                val image = remember(bitmap) { bitmap.asImageBitmap() }
                 Image(
-                    bitmap.asImageBitmap(), label,
+                    image, label,
                     Modifier
                         .weight(1f)
                         .fillMaxHeight()
@@ -862,18 +869,104 @@ private fun FaceTileFilled(
 }
 
 /**
- * 横向留白修复（等比覆盖，与 PreviewPane 的 ContentScale.Crop 同一语义）：framework
- * [VideoView] 的 onMeasure 按视频比例做 fitCenter 收缩——盒子比例与解码报告的比例有
- * 亚像素出入（Dp 取整、旋转元数据）就在盒内留下 1~2 px 的灰缝。onPrepared 后 Compose
- * 层写入视频真实像素尺寸（[videoW]/[videoH]），onMeasure 改用与 Crop 相同的公式等比
- * 放大到恰好覆盖盒子（宽比大则铺宽、高比大则铺高），MediaPlayer 把帧拉到 view 尺寸
- * 即等比、无变形；溢出的亚像素边缘被父盒子已有的圆角 clip 裁掉。每次布局 pass 都
- * 重算，滚动返回/旋转后自愈，不依赖 super 收缩结果的精度。
+ * 横向留白修复（等比覆盖，与 PreviewPane 的 ContentScale.Crop 同一语义）：视频视图的
+ * onMeasure 按视频比例做 fitCenter 收缩——盒子比例与解码报告的比例有亚像素出入（Dp
+ * 取整、旋转元数据）就在盒内留下 1~2 px 的灰缝。onPrepared 后 Compose 层写入视频真实
+ * 像素尺寸（[videoW]/[videoH]），onMeasure 改用与 Crop 相同的公式等比放大到恰好覆盖
+ * 盒子（宽比大则铺宽、高比大则铺高），MediaPlayer 把帧拉到 view 尺寸即等比、无变形；
+ * 溢出的亚像素边缘被父盒子已有的圆角 clip 裁掉。每次布局 pass 都重算，滚动返回/旋转
+ * 后自愈，不依赖 super 收缩结果的精度。
+ *
+ * ⚠ TextureView，不用 framework VideoView（其内部是 SurfaceView）：这个视图住在页面
+ * 的 verticalScroll 里。SurfaceView 的画面走独立的 SurfaceFlinger 图层，滚动时它的
+ * 位置事务比 View 树晚一帧——视频相对圆角边框和周围 UI 上下错位跳动，即"展开输出
+ * 结果后上下滑动抖动"。TextureView 是普通 View 硬件层，与周围 UI 同一帧合成，滚动
+ * 零错位；代价是每帧多一次 GPU 合成，本地小窗预览感知不到。圆角 clip 对 TextureView
+ * 也真正生效（SurfaceView 的内容不受 View clip 约束）。
  */
-private class CoverVideoView(ctx: android.content.Context) : VideoView(ctx) {
-    /** 解码报告的视频像素尺寸，onPrepared 后写入；未知时退回 super 的 fitCenter。 */
+private class CoverVideoView(ctx: android.content.Context) : android.view.TextureView(ctx),
+    android.view.TextureView.SurfaceTextureListener {
+
+    /** 解码报告的视频像素尺寸，onPrepared 后写入；未知时 onMeasure 退回 fitCenter。 */
     var videoW = 0
     var videoH = 0
+
+    private var player: android.media.MediaPlayer? = null
+    private var surfaceReady = false
+    private var prepared = false
+    private var completionBlock: ((android.media.MediaPlayer) -> Unit)? = null
+
+    var onPrepared: ((android.media.MediaPlayer) -> Unit)? = null
+
+    init {
+        surfaceTextureListener = this
+    }
+
+    fun setVideoPath(path: String) {
+        player?.release()
+        prepared = false
+        player = android.media.MediaPlayer().apply {
+            setDataSource(path)
+            setOnPreparedListener { mp ->
+                prepared = true
+                videoW = mp.videoWidth
+                videoH = mp.videoHeight
+                surfaceTexture?.setDefaultBufferSize(videoW, videoH)
+                attachSurface()
+                onPrepared?.invoke(mp)
+            }
+            setOnCompletionListener { mp -> completionBlock?.invoke(mp) }
+            prepareAsync()
+        }
+    }
+
+    fun setOnPreparedListener(block: (android.media.MediaPlayer) -> Unit) { onPrepared = block }
+    fun setOnCompletionListener(block: (android.media.MediaPlayer) -> Unit) { completionBlock = block }
+
+    /** surface 可用则挂上；surface 重挂后暂停中的解码器不再出帧，重新 seek 当前位置
+     *  强制重绘一帧，否则滚动出屏再回来是一块黑。 */
+    private fun attachSurface() {
+        val mp = player ?: return
+        val st = surfaceTexture
+        if (surfaceReady && st != null) {
+            mp.setSurface(android.view.Surface(st))
+            if (prepared && !mp.isPlaying) mp.seekTo(mp.currentPosition)
+        } else {
+            mp.setSurface(null)
+        }
+    }
+
+    // -- TextureView.SurfaceTextureListener -------------------------------------
+    override fun onSurfaceTextureAvailable(st: android.graphics.SurfaceTexture,
+                                           w: Int, h: Int) {
+        surfaceReady = true
+        if (videoW > 0 && videoH > 0) st.setDefaultBufferSize(videoW, videoH)
+        attachSurface()
+    }
+    override fun onSurfaceTextureSizeChanged(st: android.graphics.SurfaceTexture,
+                                             w: Int, h: Int) {}
+    override fun onSurfaceTextureDestroyed(st: android.graphics.SurfaceTexture): Boolean {
+        surfaceReady = false
+        player?.setSurface(null)
+        return true   // 交给系统销毁；重新可用时 TextureView 会给新的。
+    }
+    override fun onSurfaceTextureUpdated(st: android.graphics.SurfaceTexture) {}
+
+    // -- OutputPane 用到的最小播放接口 ------------------------------------------
+    fun start() { player?.start() }
+    fun pause() { player?.pause() }
+    fun seekTo(ms: Int) { player?.seekTo(ms) }
+    val currentPosition: Int get() = player?.currentPosition ?: 0
+
+    override fun onDetachedFromWindow() {
+        // key(file) 换文件或面板折叠离开组合都会走到这里。比 framework VideoView 的
+        // detach-保留策略干净：MediaPlayer 不被一个不可见视图继续持有。
+        player?.release()
+        player = null
+        prepared = false
+        surfaceReady = false
+        super.onDetachedFromWindow()
+    }
 
     override fun onMeasure(widthSpec: Int, heightSpec: Int) {
         super.onMeasure(widthSpec, heightSpec)
@@ -904,9 +997,12 @@ private class CoverVideoView(ctx: android.content.Context) : VideoView(ctx) {
 /**
  * The finished video, playable in place, with a scrub bar and a Save frame button.
  *
- * Framework [VideoView] rather than media3/ExoPlayer. One pane does not justify a player
- * dependency in an APK whose whole design is about not carrying libraries it can do
- * without -- there is no OpenCV and no ONNX Runtime on device for the same reason.
+ * [CoverVideoView] -- TextureView plus MediaPlayer -- rather than media3/ExoPlayer or the
+ * framework VideoView. One pane does not justify a player dependency in an APK whose whole
+ * design is about not carrying libraries it can do without -- there is no OpenCV and no
+ * ONNX Runtime on device for the same reason. The TextureView (not VideoView's SurfaceView)
+ * is deliberate: this pane scrolls inside the page, and a SurfaceView's layer trails the
+ * View tree by a frame -- see [CoverVideoView].
  *
  * The scrub bar is what makes Save frame worth having: it is how you find the frame you
  * want before you save it, and seeking a local MP4 is cheap.
@@ -927,13 +1023,13 @@ fun OutputPane(
 ) {
     // Keyed on the file: a second run replaces the video, and stale position/duration from
     // the previous one would put the scrub bar somewhere that no longer exists.
-    var player by remember(file) { mutableStateOf<VideoView?>(null) }
+    var player by remember(file) { mutableStateOf<CoverVideoView?>(null) }
     var durationMs by remember(file) { mutableStateOf(0) }
     var positionMs by remember(file) { mutableStateOf(0) }
     var playing by remember(file) { mutableStateOf(false) }
 
-    // Only while playing. VideoView has no position callback, so the bar has to be polled,
-    // and polling a paused video is pure battery.
+    // Only while playing. MediaPlayer has no position callback, so the bar has to be
+    // polled, and polling a paused video is pure battery.
     LaunchedEffect(playing, file) {
         while (playing) {
             positionMs = player?.currentPosition ?: 0

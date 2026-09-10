@@ -2201,7 +2201,10 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             // The API server may be mid-request. Wait briefly rather than bounce: a preview
             // that quietly does not appear is the bug this whole pass has been about.
-            if (!PipeGuard.acquire("preview", 4000)) {
+            // acquire parks on a Semaphore: on the main thread it froze the UI for up to
+            // 4s whenever a run or Live held the pipeline -- the ANR chain of 2026-09-09.
+            // Take the permit off the main thread; the permit belongs to no thread.
+            if (!withContext(Dispatchers.Default) { PipeGuard.acquire("preview", 4000) }) {
                 previewNote = pipeBusyMessage()
                 return@launch
             }
@@ -3346,7 +3349,7 @@ class MainActivity : ComponentActivity() {
         // Read at bind time by the engine, so it must be set before start() and not after.
         live.frontCamera = liveFrontCamera
         lifecycleScope.launch {
-            if (!PipeGuard.acquire("live", 5000)) {
+            if (!withContext(Dispatchers.Default) { PipeGuard.acquire("live", 5000) }) {
                 liveNote = pipeBusyMessage(); return@launch
             }
             // The preview holds a warm pipeline configured for the Swap screen. Live needs
@@ -3515,7 +3518,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             // The run owns the pipeline for its whole length, minutes on a long clip. The
             // API server gets 503 for the duration, which is the honest answer.
-            if (!PipeGuard.acquire("swap", 5000)) {
+            if (!withContext(Dispatchers.Default) { PipeGuard.acquire("swap", 5000) }) {
                 status = pipeBusyMessage()
                 busy = false
                 return@launch
@@ -3767,7 +3770,7 @@ class MainActivity : ComponentActivity() {
         BatchService.start(this)
 
         lifecycleScope.launch {
-            if (!PipeGuard.acquire("batch", 5000)) {
+            if (!withContext(Dispatchers.Default) { PipeGuard.acquire("batch", 5000) }) {
                 status = pipeBusyMessage(); busy = false
                 BatchStatus.end(); BatchService.stop(this@MainActivity)
                 return@launch

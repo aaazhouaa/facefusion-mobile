@@ -196,8 +196,9 @@ fun LiveScreen(
                         ) {
                                 val thumb = sourceThumbs.getOrNull(index)
                                 if (thumb != null) {
+                                    val image = remember(thumb) { thumb.asImageBitmap() }
                                     Image(
-                                        thumb.asImageBitmap(),
+                                        image,
                                         contentDescription =
                                             stringResource(R.string.live_source_label, index + 1),
                                         Modifier.fillMaxSize(),
