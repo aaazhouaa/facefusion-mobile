@@ -39,16 +39,8 @@ if [ "${FFNCNN:-0}" = "1" ]; then
     # -landroid for ncnn's DataReaderFromAndroidAsset, which libncnn.a always contains
     -landroid -fopenmp -static-openmp)
 fi
-# QNN headers: prefer the staged SDK tree (gitignored) when present, else fall back
-# to the tracked 27-file subset under work/android/qnn-headers so a fresh clone
-# builds without the QAIRT SDK.
-if [ -f "$CPP/include/QNN/QnnBackend.h" ]; then
-  QNN_INC=(-I"$CPP/include" -I"$CPP/include/QNN")
-else
-  QNN_INC=(-I"$FF/work/android/qnn-headers" -I"$FF/work/android/qnn-headers/QNN")
-fi
 "$CXX" -O2 -std=c++17 -fPIC \
-  "${QNN_INC[@]}" \
+  -I"$CPP/include" -I"$CPP/include/QNN" \
   "$FF/work/native/ffswap_main.cpp" "$CPP/ffqnn.cpp" "$CPP/ffcv.cpp" "$CPP/ffpipe.cpp" \
   "$CPP/ffnn.cpp" "$CPP/ffnn_qnn.cpp" "$CPP/ffaudio.cpp" "${NCNN_FLAGS[@]}" \
   -o "$OUT/ffswap" -llog -ldl -lm -static-libstdc++ 2>&1 | head -40

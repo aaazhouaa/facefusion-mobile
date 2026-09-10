@@ -6,22 +6,11 @@ project(ffnative)
 add_library(ffnative SHARED ffjni.cpp ffpipe.cpp ffcv.cpp ffqnn.cpp
                             ffnn.cpp ffnn_qnn.cpp ffaudio.cpp)
 
-# QNN headers.  The tracked subset under qnn-headers/QNN (27 files, in Git) is the
-# complete include closure ffqnn.cpp needs; a fresh clone builds against it with no
-# QAIRT SDK download.  When the SDK IS present, stage_qnn.sh copies the full SDK
-# include/QNN into cpp/include (gitignored) -- prefer that tree so a staged SDK
-# version can shadow the checked-in subset, then fall back to the subset.
-#
 # Both roots are needed: ffqnn.cpp includes "QNN/QnnBackend.h", while the SDK's own
 # sub-headers include their siblings unqualified.
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/include/QNN/QnnBackend.h")
-    set(QNN_HEADER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/include")
-else()
-    set(QNN_HEADER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../qnn-headers")
-endif()
 target_include_directories(ffnative PRIVATE
-    ${QNN_HEADER_ROOT}
-    ${QNN_HEADER_ROOT}/QNN)
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/QNN)
 
 # The QNN backend is dlopen'd at runtime from the app's nativeLibraryDir, never linked, so
 # no QNN .so is needed at build time and the build is independent of the HTP variant.
