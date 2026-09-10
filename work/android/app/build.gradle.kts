@@ -68,7 +68,8 @@ val qnnTiers = (System.getenv("QNN_HTP_TIERS") ?: "68 69 73 75 79 81")
 val qnnStage by tasks.registering {
     doLast {
         val required = mutableListOf(
-            file("src/main/cpp/include/QNN/QnnBackend.h"),
+            file("src/main/cpp/include/QNN/QnnBackend.h").takeIf { it.isFile }
+                ?: file("../qnn-headers/QNN/QnnBackend.h"),
             file("src/main/jniLibs/QNN_STAGED.txt"),
             file("src/main/jniLibs/arm64-v8a/libQnnHtp.so"),
             file("src/main/jniLibs/arm64-v8a/libQnnSystem.so"),

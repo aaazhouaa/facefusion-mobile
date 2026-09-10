@@ -43,9 +43,27 @@ for tier in $TIERS; do
     done
 done
 
+# QNN headers.  The tracked 27-file subset under qnn-headers/QNN (in Git) is the
+# complete include closure the build needs, so a fresh clone stages headers with no
+# SDK.  When the SDK IS present, copy the full SDK include/QNN instead -- the staged
+# tree then shadows the subset in CMake (see CMakeLists.txt) and the SDK version wins.
 mkdir -p "$INCLUDE_DEST" "$JNI_DEST"
 rm -rf "$INCLUDE_DEST/QNN"
-cp -a "$SDK/include/QNN" "$INCLUDE_DEST/QNN"
+if [ -d "$SDK/include/QNN" ]; then
+    cp -a "$SDK/include/QNN" "$INCLUDE_DEST/QNN"
+    echo "  headers: full SDK include/QNN -> $INCLUDE_DEST/QNN"
+else
+    # No SDK: stage the tracked subset so the include path still resolves.  The
+    # runtime .so preflight above has already failed if this is a real build, so
+    # this branch only serves header-only tooling / IDE indexing.
+    TRACKED="$HERE/qnn-headers/QNN"
+    [ -f "$TRACKED/QnnBackend.h" ] || {
+        echo "No QNN headers under $SDK/include/QNN and no tracked subset at $TRACKED" >&2
+        exit 1
+    }
+    cp -a "$TRACKED" "$INCLUDE_DEST/QNN"
+    echo "  headers: tracked subset -> $INCLUDE_DEST/QNN (no SDK headers found)"
+fi
 
 # Match the upstream APK layout: backend/system, one Android stub and one Hexagon
 # skel per supported tier. The HTP variant implementation and optional helper libraries
