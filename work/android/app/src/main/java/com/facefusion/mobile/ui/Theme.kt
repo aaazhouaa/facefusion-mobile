@@ -1,12 +1,15 @@
 package com.facefusion.mobile.ui
 
 import android.content.Context
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.LocalOverscrollConfiguration
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -170,6 +173,7 @@ val WordmarkStyle = TextStyle(
  *   switch writes a real Boolean; a fresh install passes null until it is touched.
  */
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun FaceFusionTheme(
     darkTheme: Boolean? = null,
     content: @Composable () -> Unit,
@@ -178,7 +182,18 @@ fun FaceFusionTheme(
     MaterialTheme(
         colorScheme = if (dark) FfDark else FfLight,
         typography = FfTypography,
-        content = content,
+        content = {
+            // No stretch overscroll, anywhere. On Android 12+ a fast fling into the
+            // top or bottom edge has its leftover velocity converted into a stretch:
+            // the page visibly sticks for a few hundred ms before snapping back, and
+            // a drag started inside that window first pays back the stretch before
+            // the page moves -- it reads as a stall, and a gesture made at that exact
+            // moment registers late or not at all. With the effect gone the page
+            // simply stops at the edge and the next drag scrolls from pixel one.
+            CompositionLocalProvider(LocalOverscrollConfiguration provides null) {
+                content()
+            }
+        },
     )
 }
 
