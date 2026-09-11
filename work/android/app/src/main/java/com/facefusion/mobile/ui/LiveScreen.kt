@@ -23,6 +23,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.asImageBitmap
@@ -515,6 +516,9 @@ fun LiveScreen(
                              style = MaterialTheme.typography.bodySmall)
                     }
                     Switch(checked = microphone, onCheckedChange = onMicrophoneChange,
+                           // ON reads at 69% -- the active state is the loud one, and
+                           // this keeps it from shouting next to the labels.
+                           modifier = Modifier.alpha(if (microphone) 0.69f else 1f),
                            enabled = !recording && !finalizing)
                 }
 
@@ -526,6 +530,7 @@ fun LiveScreen(
                              style = MaterialTheme.typography.bodySmall)
                     }
                     Switch(checked = swapEnabled,
+                           modifier = Modifier.alpha(if (swapEnabled) 0.69f else 1f),
                            onCheckedChange = { onToggleSwapEnabled() },
                            // Also while recording: disabling the swap mid-file is the other half
                            // of the on-the-fly mode, and the recorded feed simply keeps the
@@ -546,6 +551,7 @@ fun LiveScreen(
                              style = MaterialTheme.typography.bodySmall)
                     }
                     Switch(checked = !largestOnly,
+                           modifier = Modifier.alpha(if (!largestOnly) 0.69f else 1f),
                            onCheckedChange = { onLargestOnlyChange(!it) },
                            enabled = !assignMode && !recording && !finalizing)
                 }
@@ -582,6 +588,7 @@ fun LiveScreen(
                         }
                     }
                     Switch(checked = assignMode,
+                           modifier = Modifier.alpha(if (assignMode) 0.69f else 1f),
                            onCheckedChange = { onToggleAssignMode() },
                            // A face must be selectable before it can be assigned, so the mode
                            // cannot be turned on mid-recording either -- the chips are locked
@@ -623,6 +630,7 @@ fun LiveScreen(
                     Switch(
                         // Inverted: fast mode ON is useMySettings OFF.
                         checked = !useMySettings,
+                        modifier = Modifier.alpha(if (!useMySettings) 0.69f else 1f),
                         onCheckedChange = { wantFast ->
                             // Turning it ON needs no ceremony -- it is the safe direction, and the
                             // configuration everything about this tab was measured on. Turning it
