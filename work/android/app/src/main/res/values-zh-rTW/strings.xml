@@ -374,7 +374,8 @@
     <string name="batch_remove">從佇列移除</string>
     <string name="batch_clear_desc">清空批次佇列</string>
     <string name="batch_clear_title">清空批次佇列</string>
-    <string name="batch_clear_body">將刪除佇列中全部 %1$d 個片段及其產生的結果。</string>
+    <string name="batch_clear_body">將刪除佇列中全部 %2$d 個片段；其中 %1$d 個尚未儲存到相簿的成品會一併刪除。</string>
+    <string name="batch_saved">已儲存</string>
     <string name="batch_clear_confirm">清空</string>
     <string name="batch_unnamed_clip">片段</string>
     <string name="live_rec_start">錄製</string>

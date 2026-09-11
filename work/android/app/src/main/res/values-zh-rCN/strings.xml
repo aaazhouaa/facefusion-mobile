@@ -371,7 +371,8 @@
     <string name="batch_remove">从队列移除</string>
     <string name="batch_clear_desc">清空批量队列</string>
     <string name="batch_clear_title">清空批量队列</string>
-    <string name="batch_clear_body">将删除队列中全部 %1$d 个片段及其生成的结果。</string>
+    <string name="batch_clear_body">将删除队列中全部 %2$d 个片段；其中 %1$d 个尚未保存到相册的成品会一并删除。</string>
+    <string name="batch_saved">已保存</string>
     <string name="batch_clear_confirm">清空</string>
     <string name="batch_unnamed_clip">片段</string>
     <string name="live_rec_start">录制</string>

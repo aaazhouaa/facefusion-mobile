@@ -418,7 +418,8 @@
     <string name="batch_remove">Remove from queue</string>
     <string name="batch_clear_desc">Clear the batch queue</string>
     <string name="batch_clear_title">Clear the batch</string>
-    <string name="batch_clear_body">This drops all %1$d queued clips and their renders.</string>
+    <string name="batch_clear_body">Drops all %2$d queued clips. The %1$d finished clip(s) not yet in your gallery lose their renders.</string>
+    <string name="batch_saved">saved</string>
     <string name="batch_clear_confirm">Clear</string>
     <string name="batch_unnamed_clip">clip</string>
     <string name="swap_output_settings">Output settings</string>

@@ -1383,19 +1383,24 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onRemoveFromBatch = { i ->
                                     // A finished row holds a render. Ask before losing one,
-                                    // exactly as the single output does -- unless auto-save
-                                    // already put it in the gallery, where the file here is
-                                    // a working copy and deleting it costs nothing.
+                                    // exactly as the single output does -- UNLESS the gallery
+                                    // already has its own copy: a hand-saved clip (savedUri)
+                                    // or an auto-saved one. Warning about those read as a
+                                    // wrong count -- the dialog said "not in your gallery"
+                                    // about a clip the user had just saved by hand.
                                     val it0 = batchQueue.getOrNull(i)
-                                    if (it0?.output != null && !opts.batchAutoSave)
+                                    if (it0?.output != null && it0.savedUri == null &&
+                                        !opts.batchAutoSave)
                                         confirmBatchDelete = i
                                     else removeFromBatch(i)
                                 },
                                 onClearBatch = {
                                     // Same confirmation rule as the single row: ask only
-                                    // when real renders would be lost -- finished rows that
-                                    // auto-save has not already put in the gallery.
-                                    if (batchQueue.any { it.output != null && !opts.batchAutoSave })
+                                    // when renders the gallery does NOT hold would be lost.
+                                    if (batchQueue.any {
+                                            it.output != null && it.savedUri == null &&
+                                            !opts.batchAutoSave
+                                        })
                                         confirmBatchClear = true
                                     else clearBatch()
                                 },
@@ -1552,7 +1557,17 @@ class MainActivity : ComponentActivity() {
                         AlertDialog(
                             onDismissRequest = { confirmBatchClear = false },
                             title = { Text(stringResource(R.string.batch_clear_title)) },
-                            text = { Text(stringResource(R.string.batch_clear_body, batchQueue.size)) },
+                            text = {
+                                // The count that matters is the renders the gallery does
+                                // NOT have -- those are what clearing actually destroys.
+                                // The row total alone read as a wrong number to anyone
+                                // who had saved some of the clips by hand.
+                                val unsaved = batchQueue.count {
+                                    it.output != null && it.savedUri == null
+                                }
+                                Text(stringResource(
+                                    R.string.batch_clear_body, unsaved, batchQueue.size))
+                            },
                             confirmButton = {
                                 TextButton({ clearBatch() }) {
                                     Text(stringResource(R.string.batch_clear_confirm),
@@ -3937,8 +3952,24 @@ class MainActivity : ComponentActivity() {
                 batchQueue = batchQueue.mapIndexed { j, it ->
                     if (j != i) it else r.fold(
                         { (f, th) ->
-                            done++
-                            it.copy(state = BatchState.Done, output = f, thumb = th)
+                            // A cancel mid-encode does NOT arrive as a failure:
+                            // VideoSwapper keeps the frames already written, finalises
+                            // them into a playable file and returns SUCCESS. In a batch
+                            // that is not a finished clip -- the user stopped the run.
+                            // Delete the partial, count it cancelled, never save it.
+                            // BatchStatus.cancelled is checked beside cancelRequested
+                            // because a stop from the notification converges onto that
+                            // flag only at the top of the NEXT loop iteration -- judged
+                            // here on cancelRequested alone, a shade-of-a-second window
+                            // would mark the clip Done and hand it to auto-save.
+                            if (cancelRequested || BatchStatus.cancelled) {
+                                cancelledClips++
+                                runCatching { f.delete() }
+                                it.copy(state = BatchState.Cancelled)
+                            } else {
+                                done++
+                                it.copy(state = BatchState.Done, output = f, thumb = th)
+                            }
                         },
                         { e ->
                             when {
@@ -3966,17 +3997,23 @@ class MainActivity : ComponentActivity() {
                 // The last finished clip is what the panes show, so the screen is not left
                 // on a frame from four clips ago.
                 r.getOrNull()?.let { (f, th) ->
-                    outputFile = f
-                    // The result pane reads ITS direction from the OUTPUT (the thumbnail is
-                    // the encoded file's own aspect): a batch standing on an empty pane has
-                    // no target frame to size from, and a portrait clip must not land in a
-                    // 16:9 box.
-                    outputW = th?.width ?: 0
-                    outputH = th?.height ?: 0
-                    // AS IT FINISHES, not at the end. A batch is unattended by nature, and
-                    // saving twelve clips only once the last one lands means a cancel or a
-                    // crash at clip eleven loses ten that were already finished.
-                    if (opts.batchAutoSave) saveToGallery(f)
+                    // Same cancel rule as the state above: a clip that ended because the
+                    // user stopped the run is not a result. Its file is already deleted;
+                    // showing it here would put the partial back on the pane and hand it
+                    // to auto-save.
+                    if (!(cancelRequested || BatchStatus.cancelled)) {
+                        outputFile = f
+                        // The result pane reads ITS direction from the OUTPUT (the thumbnail is
+                        // the encoded file's own aspect): a batch standing on an empty pane has
+                        // no target frame to size from, and a portrait clip must not land in a
+                        // 16:9 box.
+                        outputW = th?.width ?: 0
+                        outputH = th?.height ?: 0
+                        // AS IT FINISHES, not at the end. A batch is unattended by nature, and
+                        // saving twelve clips only once the last one lands means a cancel or a
+                        // crash at clip eleven loses ten that were already finished.
+                        if (opts.batchAutoSave) saveToGallery(f)
+                    }
                 }
                 // The COPY, not the output. A twelve-clip batch would otherwise leave
                 // twelve full-size videos in the cache behind the twelve it produced.
@@ -3989,7 +4026,11 @@ class MainActivity : ComponentActivity() {
             appendLog("batch: %d done, %d refused, %d failed, %d cancelled, %.1f s total"
                 .format(done, refused, failed, cancelledClips,
                         (System.currentTimeMillis() - t0) / 1000.0))
-            outputPartial = cancelRequested
+            // The batch never leaves a partial on the pane: a clip stopped mid-encode had
+            // its file deleted above, so whatever outputFile points at is a complete clip
+            // and must not wear the "partial output" label. (The single-run path keeps its
+            // partial on purpose; the batch does not.)
+            outputPartial = false
             } finally {
                 NativePipe.release()
                 PipeGuard.release()

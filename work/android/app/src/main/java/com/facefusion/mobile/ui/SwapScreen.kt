@@ -1066,7 +1066,7 @@ fun SwapScreen(
                                 .size(64.dp)
                                 .clip(RoundedCornerShape(6.dp))
                                 .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .clickable(enabled = idle && item.output != null) {
+                                .clickable(enabled = (idle || run.canCancel) && item.output != null) {
                                     onOpenBatchOutput(i)
                                 },
                             contentAlignment = Alignment.Center,
@@ -1107,6 +1107,26 @@ fun SwapScreen(
                                     },
                                     modifier = Modifier
                                         .align(Alignment.BottomCenter)
+                                        .background(
+                                            MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                                            RoundedCornerShape(3.dp),
+                                        )
+                                        .padding(horizontal = 3.dp, vertical = 1.dp),
+                                )
+                            }
+                            // 已保存角标：该片段的成品已在相册（手动或自动保存）。放左上
+                            // 角，与底部状态角标、右上删除按钮错开——不用点开删除确认，
+                            // 哪些片段的成品已经在相册里一眼可辨，确认弹窗的计数也就对得
+                            // 上了。
+                            if (item.savedUri != null) {
+                                Text(
+                                    stringResource(R.string.batch_saved),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 7.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier
+                                        .align(Alignment.TopStart)
                                         .background(
                                             MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
                                             RoundedCornerShape(3.dp),
@@ -1424,7 +1444,11 @@ fun SwapScreen(
                 onToggle = { outputResultExpanded = !outputResultExpanded },
                 trailing = {
                     if (hasOutput && !outputAutoSaved) {
-                        IconButton(onClick = onSave, enabled = idle, modifier = Modifier.size(26.dp)) {
+                        // Same rule as the pane below: a finished clip can be saved to the
+                        // gallery while the rest of the batch still encodes -- its file is
+                        // complete, and waiting for the whole run is what made the saved /
+                        // unsaved counts feel wrong.
+                        IconButton(onClick = onSave, enabled = idle || run.canCancel, modifier = Modifier.size(26.dp)) {
                             Icon(
                                 IconDownload,
                                 stringResource(R.string.swap_save_to_gallery),
@@ -1496,7 +1520,12 @@ fun SwapScreen(
                         height = resultH,
                         onSaveFrame = onSaveFrame,
                         partial = outputPartial,
-                        enabled = idle,
+                        // Playable DURING a batch: every finished clip is a complete file
+                        // on disk (muxer stopped inside its own swap), so idle -- which is
+                        // false for the whole run -- must not gate it. canCancel is the
+                        // flag that says a batch is live; play what has landed while the
+                        // rest still encode.
+                        enabled = idle || run.canCancel,
                         contentWidth = resultW,
                     )
                 }
