@@ -1016,7 +1016,7 @@ fun SwapScreen(
                 }
                 // 清空全部，"批量添加"元素自身（标题行 trailing）的右端——不在内容
                 // 区里。16dp 图标；队列空时不透明度降到 31%，读作"没有可清的东西"，
-                // 但仍占着位置。
+                // 但仍占着位置。跑批中同样 31%：图标已被禁用，全亮会读作可点。
                 IconButton(
                     onClearBatch,
                     enabled = idle && batch.isNotEmpty(),
@@ -1026,7 +1026,7 @@ fun SwapScreen(
                          stringResource(R.string.batch_clear_desc),
                          Modifier.size(16.dp),
                          tint = MaterialTheme.colorScheme.onSurfaceVariant
-                             .copy(alpha = if (batch.isEmpty()) 0.31f else 1f))
+                             .copy(alpha = if (idle && batch.isNotEmpty()) 1f else 0.31f))
                 }
             },
         ) {
