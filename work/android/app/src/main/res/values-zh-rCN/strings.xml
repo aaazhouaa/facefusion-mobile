@@ -260,6 +260,7 @@
     <string name="status_cannot_read_video">无法读取视频：%1$s</string>
     <string name="status_cannot_read_image">无法读取图片</string>
     <string name="status_saved_movies">已保存到 Movies/FaceFusion</string>
+    <string name="status_batch_saved_all">已将 %1$d/%2$d 个片段保存到 Movies/FaceFusion</string>
     <string name="status_saved_pictures">已保存到 Pictures/FaceFusion</string>
     <string name="toast_saved_to">已保存到 %1$s</string>
     <string name="toast_models_ready">模型已就绪</string>

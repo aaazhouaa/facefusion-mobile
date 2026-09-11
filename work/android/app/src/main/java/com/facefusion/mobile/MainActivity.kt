@@ -1291,6 +1291,8 @@ class MainActivity : ComponentActivity() {
                                 onSavePreviewFrame = ::savePreviewFrame,
                                 saved = savedUri != null,
                                 savedPath = savedPathLabel,
+                                onSaveAll = { saveAllToGallery() },
+                                savingAll = savingAll,
                                 onPickSource = { pickSource.launch("image/*") },
                                 onPickTarget = {
                                     pickTarget.launch(arrayOf("video/*", "image/*"))
@@ -3772,7 +3774,12 @@ class MainActivity : ComponentActivity() {
             // last finished. Nulling them here blanked the whole queue on every Start -- the
             // rows then sat on the play glyph until their clip came round again -- for a
             // state that is about to be re-seeded one row at a time as each output lands.
-            it.copy(state = BatchState.Waiting, output = null, detail = null)
+            //
+            // ⚠ savedUri DOES NOT survive: it belongs to the PREVIOUS run's file, which is
+            // deleted above. Keeping it made a re-run of the same clips read as already
+            // saved -- the save-all entry stayed dimmed and the delete confirmations
+            // thought the gallery had copies it does not have.
+            it.copy(state = BatchState.Waiting, output = null, detail = null, savedUri = null)
         }
 
         // The foreground service, for the process rather than for the work. See
@@ -4155,6 +4162,52 @@ class MainActivity : ComponentActivity() {
                 toast(getString(R.string.toast_saved_to, savedPathLabel!!))
             }.onFailure {
                 status = getString(R.string.status_save_failed, it.message ?: "")
+            }
+        }
+    }
+
+    /** True while [saveAllToGallery]'s loop is writing the batch to the gallery. */
+    private var savingAll by mutableStateOf(false)
+
+    /**
+     * One tap saves EVERY finished clip the gallery does not already have.
+     *
+     * The toolbar's download icon is the entry: it lights up only when the whole queue is
+     * Done, writes the not-yet-saved renders one by one on IO, and marks each clip's row
+     * (and the pane, if that clip is the one on screen) with its gallery uri as it lands.
+     * [savingAll] gates the entry against double taps -- the rows only read "saved" after
+     * each write returns, so a second tap inside that window would queue a duplicate.
+     */
+    private fun saveAllToGallery() {
+        val targets = batchQueue.filter { it.output != null && it.savedUri == null }
+        if (targets.isEmpty()) return
+        if (savingAll) return
+        savingAll = true
+        lifecycleScope.launch {
+            try {
+                var ok = 0
+                for (item in targets) {
+                    val f = item.output ?: continue
+                    val r = withContext(Dispatchers.IO) { GallerySaver.save(this@MainActivity, f) }
+                    r.onSuccess {
+                        ok++
+                        // The row first (the source of the all-saved state), then the pane
+                        // if it is showing exactly this clip.
+                        batchQueue = batchQueue.map { q ->
+                            if (q.output == f) q.copy(savedUri = it) else q
+                        }
+                        if (outputFile == f) {
+                            savedUri = it
+                            savedPathLabel = "Movies/FaceFusion/" + f.name
+                        }
+                    }.onFailure {
+                        status = getString(R.string.status_save_failed, it.message ?: "")
+                    }
+                }
+                status = getString(R.string.status_batch_saved_all, ok, targets.size)
+                toast(getString(R.string.status_batch_saved_all, ok, targets.size))
+            } finally {
+                savingAll = false
             }
         }
     }

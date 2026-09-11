@@ -66,6 +66,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import com.facefusion.mobile.R
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material.icons.filled.Face
 
 /**
@@ -289,6 +290,10 @@ fun SwapScreen(
     onDownload: () -> Unit,
     onShareLog: () -> Unit,
     onSave: () -> Unit,
+    /** One tap saves every finished clip the gallery does not already have. */
+    onSaveAll: () -> Unit = {},
+    /** True while the save-all loop is writing -- gates the save-all entry. */
+    savingAll: Boolean = false,
     onShare: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1146,7 +1151,7 @@ fun SwapScreen(
                                     Icon(Icons.Default.Delete,
                                          stringResource(R.string.batch_remove),
                                          Modifier.size(12.dp),
-                                         tint = Color.White)
+                                         tint = Color.White.copy(alpha = 0.31f))
                                 }
                             }
                         }
@@ -1443,19 +1448,37 @@ fun SwapScreen(
                 expanded = outputResultExpanded,
                 onToggle = { outputResultExpanded = !outputResultExpanded },
                 trailing = {
-                    if (hasOutput && !outputAutoSaved) {
-                        // Same rule as the pane below: a finished clip can be saved to the
-                        // gallery while the rest of the batch still encodes -- its file is
-                        // complete, and waiting for the whole run is what made the saved /
-                        // unsaved counts feel wrong.
-                        IconButton(onClick = onSave, enabled = idle || run.canCancel, modifier = Modifier.size(26.dp)) {
-                            Icon(
-                                IconDownload,
-                                stringResource(R.string.swap_save_to_gallery),
-                                Modifier.size(18.dp),
-                            )
-                        }
-                    }
+            if (hasOutput && !outputAutoSaved) {
+                // The batch's save-all state, derived from the queue itself: the entry
+                // lights up only when EVERY clip finished, goes dim and dead once the
+                // gallery holds them all, and comes back when the next run resets the
+                // queue. A single run (empty queue) keeps the old save-current behaviour.
+                val doneItems = batch.filter { it.state == BatchState.Done }
+                val allBatchDone = batch.isNotEmpty() && doneItems.size == batch.size
+                val allBatchSaved = doneItems.isNotEmpty() &&
+                        doneItems.all { it.savedUri != null }
+                val batchSaveAllReady = allBatchDone && !allBatchSaved && !savingAll
+                val batchMode = batch.isNotEmpty()
+                IconButton(
+                    onClick = { if (batchMode) onSaveAll() else onSave() },
+                    enabled = if (batchMode) batchSaveAllReady else (idle || run.canCancel),
+                    modifier = Modifier.size(26.dp),
+                ) {
+                    // ⚠ Explicit tint, not the inherited content colour: a disabled
+                    // IconButton multiplies the inherited colour by Compose's own disabled
+                    // alpha (0.38), which would stack with ours. A fixed colour at exactly
+                    // the requested 31% keeps the dim state honest.
+                    val tint = if (batchMode && !batchSaveAllReady)
+                                   MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.31f)
+                               else LocalContentColor.current
+                    Icon(
+                        IconDownload,
+                        stringResource(R.string.swap_save_to_gallery),
+                        Modifier.size(18.dp),
+                        tint = tint,
+                    )
+                }
+            }
                 },
             ) {
             if (outputFile != null) {
@@ -1555,25 +1578,45 @@ fun SwapScreen(
                         Text(
                             stringResource(R.string.swap_autosaved_to_gallery),
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            // A statement of fact, not a control -- and already acted on,
+                            // so it reads at 31% like every other spent state here.
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                .copy(alpha = 0.31f),
                             modifier = Modifier.weight(1f),
                         )
                     } else {
-                        Button(onSave, enabled = idle, modifier = Modifier.weight(1f),
+                        val doneItems = batch.filter { it.state == BatchState.Done }
+                        val allBatchSaved = doneItems.isNotEmpty() &&
+                                doneItems.all { it.savedUri != null }
+                        val batchAllSaved = batch.isNotEmpty() && allBatchSaved
+                        Button(onSave,
+                               // Every clip the gallery does not have is written before
+                               // this button matters again; at that point it is a label,
+                               // not an action, and a second press would write duplicates.
+                               enabled = !batchAllSaved && (idle || run.canCancel),
+                               modifier = Modifier.weight(1f),
                                shape = RoundedCornerShape(14.dp),
                                colors = ButtonDefaults.buttonColors(
                                    containerColor = MaterialTheme.colorScheme.surface,
                                    contentColor = MaterialTheme.colorScheme.onBackground,
                                    disabledContainerColor = MaterialTheme.colorScheme.surface,
-                                   disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                   disabledContentColor = if (batchAllSaved)
+                                       MaterialTheme.colorScheme.onSurfaceVariant
+                                           .copy(alpha = 0.31f)
+                                   else MaterialTheme.colorScheme.onSurfaceVariant,
                                ),
                                border = BorderStroke(1.dp,
                                                      MaterialTheme.colorScheme.outlineVariant)) {
-                            Text(stringResource(if (saved) R.string.swap_saved_to_gallery
-                                                else R.string.swap_save_to_gallery))
+                            Text(stringResource(
+                                if (batchAllSaved || saved) R.string.swap_saved_to_gallery
+                                else R.string.swap_save_to_gallery))
                         }
                     }
-                    OutlinedButton(onShare, enabled = idle,
+                    // Share reads the gallery uri, not the working file -- nothing to send
+                    // until the clip is saved. Dim and dead at 31% until then, live once
+                    // savedUri exists (the auto-saved branch has it by definition).
+                    val shareEnabled = idle && saved
+                    OutlinedButton(onShare, enabled = shareEnabled,
                                    shape = RoundedCornerShape(14.dp),
                                    // Same control background as the Save button next to it:
                                    // card-surface in both schemes, not the default accent.
@@ -1581,7 +1624,10 @@ fun SwapScreen(
                                        containerColor = MaterialTheme.colorScheme.surface,
                                        contentColor = MaterialTheme.colorScheme.onBackground,
                                        disabledContainerColor = MaterialTheme.colorScheme.surface,
-                                       disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                       disabledContentColor = if (!saved)
+                                           MaterialTheme.colorScheme.onSurfaceVariant
+                                               .copy(alpha = 0.31f)
+                                       else MaterialTheme.colorScheme.onSurfaceVariant,
                                    ),
                                    border = BorderStroke(1.dp,
                                                          MaterialTheme.colorScheme.outlineVariant)) {
