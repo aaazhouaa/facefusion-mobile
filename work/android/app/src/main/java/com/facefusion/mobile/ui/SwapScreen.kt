@@ -1571,46 +1571,36 @@ fun SwapScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // Auto-save already put this clip in the gallery, so there is nothing to
-                    // offer -- just a line saying where it went. Share stays: sending it
-                    // somewhere is a different action from keeping it.
-                    if (outputAutoSaved) {
-                        Text(
-                            stringResource(R.string.swap_saved_to_gallery),
-                            style = MaterialTheme.typography.bodySmall,
-                            // A statement of fact, not a control -- and already acted on,
-                            // so it reads at 31% like every other spent state here.
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                .copy(alpha = 0.31f),
-                            modifier = Modifier.weight(1f),
-                        )
-                    } else {
-                        val doneItems = batch.filter { it.state == BatchState.Done }
-                        val allBatchSaved = doneItems.isNotEmpty() &&
-                                doneItems.all { it.savedUri != null }
-                        val batchAllSaved = batch.isNotEmpty() && allBatchSaved
-                        Button(onSave,
-                               // Every clip the gallery does not have is written before
-                               // this button matters again; at that point it is a label,
-                               // not an action, and a second press would write duplicates.
-                               enabled = !batchAllSaved && (idle || run.canCancel),
-                               modifier = Modifier.weight(1f),
-                               shape = RoundedCornerShape(14.dp),
-                               colors = ButtonDefaults.buttonColors(
-                                   containerColor = MaterialTheme.colorScheme.surface,
-                                   contentColor = MaterialTheme.colorScheme.onBackground,
-                                   disabledContainerColor = MaterialTheme.colorScheme.surface,
-                                   disabledContentColor = if (batchAllSaved)
-                                       MaterialTheme.colorScheme.onSurfaceVariant
-                                           .copy(alpha = 0.31f)
-                                   else MaterialTheme.colorScheme.onSurfaceVariant,
-                               ),
-                               border = BorderStroke(1.dp,
-                                                     MaterialTheme.colorScheme.outlineVariant)) {
-                            Text(stringResource(
-                                if (batchAllSaved || saved) R.string.swap_saved_to_gallery
-                                else R.string.swap_save_to_gallery))
-                        }
+                    // Auto-save already put this clip in the gallery, so the Save button
+                    // shows as the same spent "Saved to gallery" label it does after a
+                    // manual save -- dim at 31% and dead, not a plain text line. Share
+                    // stays: sending it somewhere is a different action from keeping it.
+                    val doneItems = batch.filter { it.state == BatchState.Done }
+                    val allBatchSaved = doneItems.isNotEmpty() &&
+                            doneItems.all { it.savedUri != null }
+                    val batchAllSaved = batch.isNotEmpty() && allBatchSaved
+                    val spent = outputAutoSaved || batchAllSaved
+                    Button(onSave,
+                           // Every clip the gallery does not have is written before
+                           // this button matters again; at that point it is a label,
+                           // not an action, and a second press would write duplicates.
+                           enabled = !spent && (idle || run.canCancel),
+                           modifier = Modifier.weight(1f),
+                           shape = RoundedCornerShape(14.dp),
+                           colors = ButtonDefaults.buttonColors(
+                               containerColor = MaterialTheme.colorScheme.surface,
+                               contentColor = MaterialTheme.colorScheme.onBackground,
+                               disabledContainerColor = MaterialTheme.colorScheme.surface,
+                               disabledContentColor = if (spent)
+                                   MaterialTheme.colorScheme.onSurfaceVariant
+                                       .copy(alpha = 0.31f)
+                               else MaterialTheme.colorScheme.onSurfaceVariant,
+                           ),
+                           border = BorderStroke(1.dp,
+                                                 MaterialTheme.colorScheme.outlineVariant)) {
+                        Text(stringResource(
+                            if (spent || saved) R.string.swap_saved_to_gallery
+                            else R.string.swap_save_to_gallery))
                     }
                     // Share reads the gallery uri, not the working file -- nothing to send
                     // until the clip is saved. Dim and dead at 31% until then, live once
