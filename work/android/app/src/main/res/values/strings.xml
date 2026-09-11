@@ -437,7 +437,6 @@
     <string name="status_batch_already_queued">Those clips are already in the queue.</string>
     <string name="batch_autosave">Save each clip to the gallery as it finishes</string>
     <string name="batch_output_of">Clip %1$d of %2$d, swipe to change</string>
-    <string name="swap_autosaved_to_gallery">Saved to Movies/FaceFusion automatically.</string>
     <string name="swap_batch_menu">Batch add</string>
     <string name="swap_batch_add">Add more clips (batch)</string>
     <string name="swap_batch_add_more">Add more clips</string>

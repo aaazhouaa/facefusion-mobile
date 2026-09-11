@@ -1576,7 +1576,7 @@ fun SwapScreen(
                     // somewhere is a different action from keeping it.
                     if (outputAutoSaved) {
                         Text(
-                            stringResource(R.string.swap_autosaved_to_gallery),
+                            stringResource(R.string.swap_saved_to_gallery),
                             style = MaterialTheme.typography.bodySmall,
                             // A statement of fact, not a control -- and already acted on,
                             // so it reads at 31% like every other spent state here.
