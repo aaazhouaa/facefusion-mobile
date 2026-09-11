@@ -1015,8 +1015,8 @@ fun SwapScreen(
                          fontSize = 11.sp)
                 }
                 // 清空全部，"批量添加"元素自身（标题行 trailing）的右端——不在内容
-                // 区里。16dp 图标；队列空时不透明度降到 69%（降 31%），读作"没有
-                // 可清的东西"，但仍占着位置。
+                // 区里。16dp 图标；队列空时不透明度降到 31%，读作"没有可清的东西"，
+                // 但仍占着位置。
                 IconButton(
                     onClearBatch,
                     enabled = idle && batch.isNotEmpty(),
@@ -1026,7 +1026,7 @@ fun SwapScreen(
                          stringResource(R.string.batch_clear_desc),
                          Modifier.size(16.dp),
                          tint = MaterialTheme.colorScheme.onSurfaceVariant
-                             .copy(alpha = if (batch.isEmpty()) 0.69f else 1f))
+                             .copy(alpha = if (batch.isEmpty()) 0.31f else 1f))
                 }
             },
         ) {
@@ -1151,7 +1151,7 @@ fun SwapScreen(
                                     Icon(Icons.Default.Delete,
                                          stringResource(R.string.batch_remove),
                                          Modifier.size(12.dp),
-                                         tint = Color.White.copy(alpha = 0.31f))
+                                         tint = Color.White)
                                 }
                             }
                         }
