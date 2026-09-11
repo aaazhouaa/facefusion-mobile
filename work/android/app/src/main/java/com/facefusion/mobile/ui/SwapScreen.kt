@@ -7,7 +7,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,6 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import com.facefusion.mobile.displayThumb
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontFamily
@@ -58,6 +60,7 @@ import com.facefusion.mobile.OptionSlider
 import com.facefusion.mobile.OptionSteps
 import com.facefusion.mobile.SwapOptions
 import java.io.File
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -1436,23 +1439,56 @@ fun SwapScreen(
                 // the pane currently sits in that list.
                 val doneIx = batch.indices.filter { batch[it].output != null }
                 val cur = doneIx.indexOfFirst { batch[it].output == outputFile }
-                var drag by remember(outputFile) { mutableStateOf(0f) }
                 Box(
                     Modifier.pointerInput(doneIx.size, cur) {
                         if (doneIx.size < 2 || cur < 0) return@pointerInput
                         // ⚠ HORIZONTAL only, and accumulated to a threshold rather than acted
-                        // on per event. detectHorizontalDragGestures ignores a vertical-dominant
-                        // drag, so the page still scrolls with a finger on the video -- which
-                        // matters, because this pane is most of the screen.
-                        detectHorizontalDragGestures(
-                            onDragEnd = {
-                                val step = if (drag < -60f) 1 else if (drag > 60f) -1 else 0
-                                drag = 0f
-                                if (step != 0)
-                                    doneIx.getOrNull(cur + step)?.let(onOpenBatchOutput)
-                            },
-                            onDragCancel = { drag = 0f },
-                        ) { change, amount -> drag += amount; change.consume() }
+                        // on per event. This cannot be detectHorizontalDragGestures: its slop
+                        // check is single-axis (|dx| > slop, dy never consulted) and children
+                        // see events before the page's verticalScroll, so on a fast flick --
+                        // whose trace always carries some sideways drift -- this pane crossed
+                        // the line first, consumed the whole gesture and the page froze
+                        // mid-fling. Users read that as "the swipe didn't register" and
+                        // needed two or three tries. The fix is to judge BOTH axes against
+                        // slop and take the gesture only when horizontal clearly dominates;
+                        // anything else is released untouched and the page scrolls.
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            val slop = viewConfiguration.touchSlop
+                            var dx = 0f
+                            var dy = 0f
+                            var horizontal: Boolean? = null
+                            while (horizontal == null) {
+                                val ev = awaitPointerEvent()
+                                val change = ev.changes.firstOrNull { it.id == down.id }
+                                    ?: return@awaitEachGesture
+                                val delta = change.positionChange()
+                                dx += delta.x
+                                dy += delta.y
+                                if (abs(dx) > slop || abs(dy) > slop) {
+                                    // 1.2x margin: near-diagonal flicks stay with the page.
+                                    horizontal = abs(dx) > abs(dy) * 1.2f
+                                } else if (!ev.changes.any { it.pressed }) {
+                                    return@awaitEachGesture
+                                }
+                            }
+                            if (!horizontal) return@awaitEachGesture
+                            // A horizontal swipe it is -- from here the pane owns the
+                            // gesture: consume moves so the page does not also scroll,
+                            // accumulate, and swap results on lift past the threshold.
+                            var accum = dx
+                            while (true) {
+                                val ev = awaitPointerEvent()
+                                val change = ev.changes.firstOrNull { it.id == down.id }
+                                    ?: break
+                                accum += change.positionChange().x
+                                change.consume()
+                                if (!ev.changes.any { it.pressed }) break
+                            }
+                            val step = if (accum < -60f) 1 else if (accum > 60f) -1 else 0
+                            if (step != 0)
+                                doneIx.getOrNull(cur + step)?.let(onOpenBatchOutput)
+                        }
                     }
                 ) {
                     OutputPane(
