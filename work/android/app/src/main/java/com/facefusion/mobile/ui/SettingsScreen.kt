@@ -203,7 +203,9 @@ fun SettingsScreen(
         // The active set is open and offers downloads. The rest are collapsed and offer
         // only deletion, which is the action they are there for.
         val modelCard: @Composable (List<ModelRow>, Boolean) -> Unit = { rows, active ->
-            Card(Modifier.fillMaxWidth()) {
+            Card(Modifier.fillMaxWidth(),
+                 colors = CardDefaults.cardColors(
+                     containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(Modifier.padding(vertical = 4.dp)) {
                     rows.forEachIndexed { i, m ->
                         if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -317,7 +319,9 @@ fun SettingsScreen(
         }
         if (tab == 1) {
         Caption(stringResource(R.string.set_this_device))
-        Card(Modifier.fillMaxWidth()) {
+        Card(Modifier.fillMaxWidth(),
+                 colors = CardDefaults.cardColors(
+                     containerColor = MaterialTheme.colorScheme.surface)) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 // The RUNTIME first, because on a non-Qualcomm phone it is the only row on
                 // this card about the machine the user is actually holding. Everything
@@ -395,7 +399,9 @@ fun SettingsScreen(
         if (onForceBackend != null && (device.backend == "qnn" || forcedBackend.isNotEmpty())) {
             Spacer(Modifier.height(6.dp))
             Caption(stringResource(R.string.set_runtime))
-            Card(Modifier.fillMaxWidth()) {
+            Card(Modifier.fillMaxWidth(),
+                 colors = CardDefaults.cardColors(
+                     containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(Modifier.padding(14.dp),
                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
@@ -438,7 +444,9 @@ fun SettingsScreen(
         // ModelDownload's: the service owns it, and threading it through the Activity would
         // only add a copy that can be stale.
         Caption(stringResource(R.string.set_remote_api))
-        Card(Modifier.fillMaxWidth()) {
+        Card(Modifier.fillMaxWidth(),
+                 colors = CardDefaults.cardColors(
+                     containerColor = MaterialTheme.colorScheme.surface)) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -507,7 +515,9 @@ fun SettingsScreen(
         }
         if (tab == 1) {
         Caption(stringResource(R.string.set_supported_devices))
-        Card(Modifier.fillMaxWidth()) {
+        Card(Modifier.fillMaxWidth(),
+                 colors = CardDefaults.cardColors(
+                     containerColor = MaterialTheme.colorScheme.surface)) {
             Column(Modifier.padding(vertical = 4.dp)) {
                 TIERS.forEachIndexed { i, (tier, chipsRes) ->
                     val chips = stringResource(chipsRes)
@@ -562,7 +572,9 @@ fun SettingsScreen(
         }
         if (tab == 3) {
         Caption(stringResource(R.string.set_bug_report))
-        Card(Modifier.fillMaxWidth()) {
+        Card(Modifier.fillMaxWidth(),
+                 colors = CardDefaults.cardColors(
+                     containerColor = MaterialTheme.colorScheme.surface)) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     stringResource(R.string.set_bug_report_body),
@@ -578,7 +590,9 @@ fun SettingsScreen(
 
         Caption(stringResource(R.string.set_about))
         val uris = LocalUriHandler.current
-        Card(Modifier.fillMaxWidth()) {
+        Card(Modifier.fillMaxWidth(),
+                 colors = CardDefaults.cardColors(
+                     containerColor = MaterialTheme.colorScheme.surface)) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     stringResource(R.string.set_about_body),
