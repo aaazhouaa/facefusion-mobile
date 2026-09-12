@@ -2,15 +2,15 @@
 # Stage the QAIRT/QNN headers and Android/Hexagon runtime libraries required by the APK.
 #
 # Usage:
-#   source /workspace/env/qairt-sdk.sh
 #   bash work/android/stage_qnn.sh
+#   (QNN_SDK_ROOT 由 /etc/profile.d/android-sdk.sh 设为 /opt/QNN)
 #
 # Override QNN_SDK_ROOT to stage another SDK release. The generated files live below
 # app/src/main/cpp/include and app/src/main/jniLibs, both intentionally gitignored.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-SDK=${QNN_SDK_ROOT:-${QAIRT_SDK_ROOT:-/workspace/toolchains/qairt/current}}
+SDK=${QNN_SDK_ROOT:-/opt/QNN}
 APP="$HERE/app/src/main"
 INCLUDE_DEST="$APP/cpp/include"
 JNI_DEST="$APP/jniLibs/arm64-v8a"

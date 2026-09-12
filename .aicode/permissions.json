@@ -1,0 +1,17 @@
+{
+    "permissions": {
+        "allow": [
+            "Bash(sed)",
+            "Bash(echo)",
+            "Bash(ls)",
+            "Bash(grep)",
+            "Bash(head)",
+            "writeFile",
+            "Bash(bash)",
+            "Bash(1)",
+            "Bash(tail)",
+            "editFile"
+        ],
+        "deny": []
+    }
+}
