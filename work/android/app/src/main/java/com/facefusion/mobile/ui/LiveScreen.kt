@@ -54,8 +54,8 @@ import kotlinx.coroutines.delay
 @Composable
 fun LiveScreen(
     sourceThumb: Bitmap?,
-    /** The loaded live sources, thumbnail first -- one row each inside the fold. */
-    sourceThumbs: List<Bitmap?> = emptyList(),
+    /** Every source face, in native slot order. Drawn inside the source fold. */
+    sourceThumbs: List<Bitmap> = emptyList(),
     sourceCount: Int = 0,
     activeSource: Int = 0,
     onSelectSource: (Int) -> Unit = {},
@@ -78,6 +78,12 @@ fun LiveScreen(
     frontCamera: Boolean = true,
     /** Flip the lens. Stops and restarts the pump when it is running. */
     onSwitchCamera: () -> Unit = {},
+    /**
+     * Whether the DISPLAYED feed is mirrored. Follows the lens unless the user overrides
+     * it, and it changes NOTHING but this picture -- see the Image below.
+     */
+    mirror: Boolean = true,
+    onToggleMirror: () -> Unit = {},
     /** Whether a recording is in flight -- roadmap 13b. */
     recording: Boolean = false,
     microphone: Boolean = false,
@@ -89,6 +95,9 @@ fun LiveScreen(
     onToggleSwapEnabled: () -> Unit = {},
     /** Assign-per-person mode: OFF is default behaviour, ON lets each face keep a source. */
     assignMode: Boolean = false,
+    /** Whether the brush is "keep the original face" rather than a source slot. */
+    keepOriginalBrush: Boolean = false,
+    onKeepOriginal: () -> Unit = {},
     onToggleAssignMode: () -> Unit = {},
     /** A tap on the feed, as DISPLAY bitmap coordinates (mirror and crop already undone). */
     onAssignFace: (Float, Float) -> Unit = { _, _ -> },
@@ -179,8 +188,30 @@ fun LiveScreen(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
+                    if (assignMode) {
+                        Box(
+                            Modifier
+                                .size(72.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .border(
+                                    if (keepOriginalBrush) 2.dp else 1.dp,
+                                    if (keepOriginalBrush) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.outlineVariant,
+                                    RoundedCornerShape(12.dp),
+                                )
+                                .clickable(enabled = !finalizing) { onKeepOriginal() },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                painterResource(R.drawable.ic_person_off),
+                                contentDescription = stringResource(R.string.assign_keep_original),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(26.dp),
+                            )
+                        }
+                    }
                     repeat(sourceCount) { index ->
-                        val selected = index == activeSource
+                        val selected = index == activeSource && !keepOriginalBrush
                         // The slot's bound content: a full-bleed 72 x 72 dp tile, bordered
                         // like the pick tile; the selected one carries the accent border.
                         Box(
@@ -281,7 +312,7 @@ fun LiveScreen(
                 // DIMENSIONS are constant for a session, so they are the key: the detector
                 // restarts once when live starts (0 -> real size) and not again, and the
                 // mapping math below only needs them.
-                .pointerInput(assignMode, running, frontCamera, fw, fh) {
+                .pointerInput(assignMode, running, mirror, fw, fh) {
                     if (assignMode && running && frame != null) {
                         detectTapGestures { off ->
                             val bw = size.width.toFloat(); val bh = size.height.toFloat()
@@ -289,7 +320,10 @@ fun LiveScreen(
                             val ox = (bw - fw * s) / 2f; val oy = (bh - fh * s) / 2f
                             var bx = (off.x - ox) / s
                             val by = (off.y - oy) / s
-                            if (frontCamera) bx = fw - bx
+                            // The MIRROR, not the lens: the finger lands on what is
+                            // DRAWN, and after the override those are two different
+                            // questions.
+                            if (mirror) bx = fw - bx
                             onAssignFace(bx.coerceIn(0f, fw), by.coerceIn(0f, fh))
                         }
                     }
@@ -301,20 +335,23 @@ fun LiveScreen(
                     bitmap = frame.asImageBitmap(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    // ⚠ THE MIRROR LIVES HERE AND NOWHERE ELSE. The pipeline sees the true
-                    // image so the detector gets a face the right way round; only what is
-                    // drawn is flipped, which is what every selfie camera does and what
-                    // makes moving left move left.
+                    // ⚠ THE MIRROR LIVES HERE AND NOWHERE ELSE. The pipeline sees the
+                    // true image so the detector gets a face the right way round, and so
+                    // does the recorder; only what is DRAWN is flipped, which is what
+                    // every selfie camera does and what makes moving left move left.
                     //
-                    // ⚠ FRONT ONLY. The back camera is not a mirror -- it points at what
-                    // the user is looking at, and flipping it puts text backwards and
-                    // moves the world the wrong way. Mirroring it would not touch the
-                    // swap, which is what makes the mistake hard to read: the pipeline
-                    // gets the true image either way, so the bug would look like the
-                    // model failing when it is only the view.
+                    // ⚠ It DEFAULTS to the front lens and only the front lens. The back
+                    // camera is not a mirror -- it points at what the user is already
+                    // looking at, and flipping it puts text backwards and moves the world
+                    // the wrong way. A switch exists because someone may want it anyway,
+                    // but it starts off there and goes back to following the lens on every
+                    // camera change. Getting this wrong would not touch the swap, which is
+                    // what makes the mistake hard to read: the pipeline gets the true
+                    // image either way, so the bug looks like the model failing when it is
+                    // only the view.
                     modifier = Modifier
                         .fillMaxSize()
-                        .graphicsLayer(scaleX = if (frontCamera) -1f else 1f),
+                        .graphicsLayer(scaleX = if (mirror) -1f else 1f),
                 )
             } else {
                 Text(
@@ -379,14 +416,15 @@ fun LiveScreen(
             // draws with, so the outline sits on the person the user tapped.
             if (assignFade && assignBox != null && assignBox.size >= 5 && frame != null) {
                 val b = assignBox
-                val label = stringResource(R.string.live_source_label, b[4].toInt() + 1)
+                val label = if (b[4] < 0) stringResource(R.string.assign_keep_original)
+                            else stringResource(R.string.live_source_label, b[4].toInt() + 1)
                 Canvas(Modifier.fillMaxSize()) {
                     val fw = frame.width.toFloat(); val fh = frame.height.toFloat()
                     val bw = size.width.toFloat(); val bh = size.height.toFloat()
                     val s = maxOf(bw / fw, bh / fh)
                     val ox = (bw - fw * s) / 2f; val oy = (bh - fh * s) / 2f
-                    val l = ox + (if (frontCamera) fw - b[2] else b[0]) * s
-                    val r = ox + (if (frontCamera) fw - b[0] else b[2]) * s
+                    val l = ox + (if (mirror) fw - b[2] else b[0]) * s
+                    val r = ox + (if (mirror) fw - b[0] else b[2]) * s
                     val t = oy + b[1] * s
                     val bo = oy + b[3] * s
                     drawRect(FfRed, topLeft = Offset(l, t),
@@ -411,14 +449,15 @@ fun LiveScreen(
             // mapping as the confirmation box.
             if (selectionBox != null && selectionBox.size >= 5 && frame != null) {
                 val b = selectionBox
-                val label = stringResource(R.string.live_source_label, b[4].toInt() + 1)
+                val label = if (b[4] < 0) stringResource(R.string.assign_keep_original)
+                            else stringResource(R.string.live_source_label, b[4].toInt() + 1)
                 Canvas(Modifier.fillMaxSize()) {
                     val fw = frame.width.toFloat(); val fh = frame.height.toFloat()
                     val bw = size.width.toFloat(); val bh = size.height.toFloat()
                     val s = maxOf(bw / fw, bh / fh)
                     val ox = (bw - fw * s) / 2f; val oy = (bh - fh * s) / 2f
-                    val l = ox + (if (frontCamera) fw - b[2] else b[0]) * s
-                    val r = ox + (if (frontCamera) fw - b[0] else b[2]) * s
+                    val l = ox + (if (mirror) fw - b[2] else b[0]) * s
+                    val r = ox + (if (mirror) fw - b[0] else b[2]) * s
                     val t = oy + b[1] * s
                     val bo = oy + b[3] * s
                     drawRect(Color.White, topLeft = Offset(l, t),
@@ -509,6 +548,19 @@ fun LiveScreen(
             onToggle = { settingsOpen = !settingsOpen },
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.live_mirror),
+                             style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(if (mirror) R.string.live_mirror_on
+                                            else R.string.live_mirror_off),
+                             style = MaterialTheme.typography.bodySmall,
+                             color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = mirror, onCheckedChange = { onToggleMirror() },
+                           modifier = Modifier.alpha(if (mirror) 0.69f else 1f))
+                }
+
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(stringResource(R.string.live_mic), style = MaterialTheme.typography.bodyMedium)

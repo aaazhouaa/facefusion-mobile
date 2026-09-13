@@ -437,8 +437,8 @@ android {
         // 87 = the band's missing gap under its own divider, and the run preview at the
         // rate the NPU can actually feed it.
         // 88 = an optional model that is absent by design stopped logging at ERROR.
-        versionCode = 88
-        versionName = "0.9.16$variantTag"    // "-dev" == NO content gate
+        versionCode = 96
+        versionName = "0.9.24$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }
@@ -491,6 +491,15 @@ android {
                 storePassword = keystoreProps.getProperty("storePassword")
                 keyAlias = keystoreProps.getProperty("keyAlias")
                 keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        } else {
+            // No release keystore in this tree. Sign with the Android debug key so the
+            // APK can be installed; it cannot update an APK signed with the lost key.
+            create("release") {
+                storeFile = file("${System.getProperty("user.home")}/.android/debug.keystore")
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
             }
         }
     }
