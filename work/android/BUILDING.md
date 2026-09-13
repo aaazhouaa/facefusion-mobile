@@ -1,11 +1,14 @@
 # Debug build
 
-Use JDK 17, Android SDK platform 35 and build tools 34.0.0. Set `sdk.dir` in the
-ignored `local.properties` file, or set `ANDROID_HOME`.
+Use JDK 21, Android SDK platform 35 and build tools 35.0.0, with Gradle 8.14.2 (the
+wrapper distribution) and AGP 8.9.1. `ANDROID_HOME=/opt/android-sdk` is exported by
+`/etc/profile.d/android-sdk.sh`, so no `local.properties` is needed; on another machine,
+set `sdk.dir` in the ignored `local.properties`, or set `ANDROID_HOME`.
 
-The usual native source build also requires NDK 27.2.12479018, CMake 3.22.1,
+The usual native source build also requires NDK 29.0.14206865, CMake 3.28.3,
 Qualcomm QNN headers/runtime and optionally the staged ncnn libraries. These native
-SDK inputs are intentionally absent from Git.
+SDK inputs are intentionally absent from Git. QNN inputs come from `QNN_SDK_ROOT`
+(`/opt/QNN` here); ncnn is not staged on this machine, so the build is QNN-only.
 
 For Kotlin/UI-only work, matching prebuilt native libraries can be supplied:
 

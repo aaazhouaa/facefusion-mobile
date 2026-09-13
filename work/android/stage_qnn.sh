@@ -21,10 +21,23 @@ TIERS=${QNN_HTP_TIERS:-"68 69 73 75 79 81"}
     echo "Set QNN_SDK_ROOT to an extracted QAIRT SDK root." >&2
     exit 1
 }
-[ -d "$SDK/lib/aarch64-android" ] || {
-    echo "No Android runtime directory under $SDK/lib/aarch64-android" >&2
+[ -d "$SDK/lib/aarch64-android" ] || [ -d "$SDK/jniLibs/arm64-v8a" ] || {
+    echo "No Android runtime set under $SDK (expected lib/aarch64-android or jniLibs/arm64-v8a)" >&2
+    echo "Set QNN_SDK_ROOT to an extracted QAIRT SDK root." >&2
     exit 1
 }
+
+# Two SDK shapes are accepted.  A full QAIRT extract keeps the Android runtimes under
+# lib/aarch64-android and each Hexagon skel under lib/hexagon-v<tier>/unsigned.  A bench
+# that forwards only the already-packaged set (this container's /opt/QNN) carries all of
+# them in one flat jniLibs/arm64-v8a -- already the layout the APK wants.
+if [ -d "$SDK/lib/aarch64-android" ]; then
+    ANDROID_LIB_DIR="$SDK/lib/aarch64-android"
+    skel_src() { echo "$SDK/lib/hexagon-v$1/unsigned/libQnnHtpV$1Skel.so"; }
+else
+    ANDROID_LIB_DIR="$SDK/jniLibs/arm64-v8a"
+    skel_src() { echo "$ANDROID_LIB_DIR/libQnnHtpV$1Skel.so"; }
+fi
 
 # Preflight every source before touching the staging tree. This prevents a failed build
 # from leaving a half-refreshed set of ignored libraries behind.
@@ -33,14 +46,12 @@ for tier in $TIERS; do
     android_libs+=("libQnnHtpV${tier}Stub.so")
 done
 for lib in "${android_libs[@]}"; do
-    src="$SDK/lib/aarch64-android/$lib"
+    src="$ANDROID_LIB_DIR/$lib"
     [ -f "$src" ] || { echo "Missing required Android runtime: $src" >&2; exit 1; }
 done
 for tier in $TIERS; do
-    hex="$SDK/lib/hexagon-v${tier}/unsigned"
-    for lib in "libQnnHtpV${tier}Skel.so"; do
-        [ -f "$hex/$lib" ] || { echo "Missing required Hexagon skel: $hex/$lib" >&2; exit 1; }
-    done
+    skel="$(skel_src "$tier")"
+    [ -f "$skel" ] || { echo "Missing required Hexagon skel: $skel" >&2; exit 1; }
 done
 
 mkdir -p "$INCLUDE_DEST" "$JNI_DEST"
@@ -53,13 +64,16 @@ cp -a "$SDK/include/QNN" "$INCLUDE_DEST/QNN"
 rm -f "$JNI_DEST"/libQnnHtpV*.so
 rm -f "$JNI_DEST"/libQnnHtpPrepare.so "$JNI_DEST"/libQnnHtpNetRunExtensions.so
 for lib in "${android_libs[@]}"; do
-    cp -a "$SDK/lib/aarch64-android/$lib" "$JNI_DEST/$lib"
+    cp -a "$ANDROID_LIB_DIR/$lib" "$JNI_DEST/$lib"
 done
 for tier in $TIERS; do
-    cp -a "$SDK/lib/hexagon-v${tier}/unsigned/libQnnHtpV${tier}Skel.so" "$JNI_DEST/libQnnHtpV${tier}Skel.so"
+    cp -a "$(skel_src "$tier")" "$JNI_DEST/libQnnHtpV${tier}Skel.so"
 done
 
-version=${QAIRT_VERSION:-$(basename "$(readlink -f "$SDK")")}
+# A flat staged tree is named /opt/QNN, which says nothing about the release it came from;
+# the SDK's own staging record does.
+version=${QAIRT_VERSION:-$(sed -n 's/^QAIRT SDK[[:space:]]*//p' "$SDK/QNN_STAGED.txt" 2>/dev/null | head -1)}
+version=${version:-$(basename "$(readlink -f "$SDK")")}
 {
     echo "QAIRT SDK  $version"
     echo "source     $(readlink -f "$SDK")"
