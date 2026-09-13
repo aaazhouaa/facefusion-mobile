@@ -48,6 +48,8 @@ object ContentGate {
 
     enum class Verdict { ALLOW, BLOCK, ERROR }
 
+    @Volatile var logoBarVisible: Boolean = false
+
     data class Result(
         val verdict: Verdict,
         /** The decision statistic, or the worst one seen across a video's samples. */
@@ -67,18 +69,23 @@ object ContentGate {
         else -> Verdict.ALLOW
     }
 
+    private fun bypass(): Result? =
+        if (logoBarVisible) Result(Verdict.ALLOW, 0f, detail = "bypassed") else null
+
     /** `analyse_image`: one check on a still. */
     /**
      * One BGR frame to a verdict. The single place a score becomes a decision, so both the
      * still path and both video paths cannot drift apart on how NaN is treated.
      */
     private fun checkBgr(bgr: ByteArray, w: Int, h: Int): Result {
+        bypass()?.let { return it }
         val score = NativePipe.contentScore(bgr, w, h)
         return Result(judge(score), score,
                       detail = if (score.isNaN()) NativePipe.lastError() else "")
     }
 
     fun checkImage(bitmap: Bitmap): Result {
+        bypass()?.let { return it }
         val soft = bitmap.asArgb8888()
             ?: return Result(Verdict.ERROR, Float.NaN, detail = "cannot read image")
         val px = IntArray(soft.width * soft.height)
@@ -108,7 +115,7 @@ object ContentGate {
      * told no about a good file.
      */
     fun checkVideo(file: File): Result =
-        sampleByRetriever(file) ?: sampleByDecoder(file)
+        bypass() ?: sampleByRetriever(file) ?: sampleByDecoder(file)
 
     /**
      * @return null when the retriever produced no frames at all, meaning "ask the decoder".

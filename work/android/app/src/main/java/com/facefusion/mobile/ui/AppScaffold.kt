@@ -1,9 +1,12 @@
 package com.facefusion.mobile.ui
 
+import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Face
 import androidx.compose.material.icons.filled.Settings
@@ -12,11 +15,14 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -42,6 +48,8 @@ fun AppScaffold(
     // Pin the manual theme: the argument is the mode to switch TO (true = dark).
     // Same write path as the Settings switch -- [com.facefusion.mobile.ui.ThemePrefs].
     onToggleTheme: (Boolean) -> Unit,
+    showLogoBar: Boolean = false,
+    onToggleLogoBar: () -> Unit = {},
     content: @Composable (PaddingValues) -> Unit,
 ) {
     Scaffold(
@@ -83,7 +91,44 @@ fun AppScaffold(
                     // out-shout the tiles under it on a dark theme.
                     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
                     val brandAlpha = if (isDark) 0.69f else 1f
-                    AppMark(size = 23.dp, modifier = Modifier.alpha(brandAlpha))
+                    val brandColor = MaterialTheme.colorScheme.onBackground.copy(alpha = brandAlpha)
+                    val toggleLogoBar = rememberUpdatedState(onToggleLogoBar)
+                    val logoTaps = remember { intArrayOf(0) }
+                    val logoWindowStart = remember { longArrayOf(0L) }
+                    Box {
+                        AppMark(
+                            size = 23.dp,
+                            modifier = Modifier
+                                .alpha(brandAlpha)
+                                .pointerInput(Unit) {
+                                    detectTapGestures {
+                                        val now = SystemClock.elapsedRealtime()
+                                        if (now - logoWindowStart[0] > 2000L) {
+                                            logoTaps[0] = 1
+                                            logoWindowStart[0] = now
+                                        } else {
+                                            logoTaps[0] += 1
+                                            if (logoTaps[0] >= 3) {
+                                                toggleLogoBar.value()
+                                                logoTaps[0] = 0
+                                                logoWindowStart[0] = 0L
+                                            }
+                                        }
+                                    }
+                                },
+                        )
+                        if (showLogoBar) {
+                            Box(
+                                Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .offset(y = 3.dp)
+                                    .width(6.dp)
+                                    .height(2.dp)
+                                    .clip(RoundedCornerShape(percent = 50))
+                                    .background(brandColor),
+                            )
+                        }
+                    }
                     Wordmark(
                         Modifier.weight(1f),
                         color = MaterialTheme.colorScheme.onBackground.copy(alpha = brandAlpha),

@@ -208,6 +208,7 @@ fun FaceFusionTheme(
 object ThemePrefs {
     private const val FILE = "theme_prefs"
     private const val K_DARK = "dark_mode"
+    private const val K_LOGO_BAR = "logo_bar"
 
     fun load(context: Context): Boolean? {
         val p = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -217,5 +218,14 @@ object ThemePrefs {
     fun save(context: Context, dark: Boolean) {
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
             .edit().putBoolean(K_DARK, dark).apply()
+    }
+
+    fun loadLogoBar(context: Context): Boolean =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getBoolean(K_LOGO_BAR, false)
+
+    fun saveLogoBar(context: Context, visible: Boolean) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .edit().putBoolean(K_LOGO_BAR, visible).apply()
     }
 }

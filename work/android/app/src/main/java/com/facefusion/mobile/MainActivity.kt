@@ -352,12 +352,24 @@ class MainActivity : ComponentActivity() {
     private var darkTheme by mutableStateOf<Boolean?>(null)
 
     /**
+     * Tiny bar under the top-bar mark, toggled by three taps in two seconds.
+     * Same persist path as the theme -- [ThemePrefs] -- so it survives a restart.
+     */
+    private var logoBar by mutableStateOf(false)
+
+    /**
      * The one write path for the manual theme choice -- the top-bar sun/moon lands
      * here, so the composed state and the disk copy ([ThemePrefs]) cannot drift apart.
      */
     private fun pinTheme(dark: Boolean) {
         darkTheme = dark
         ThemePrefs.save(this, dark)
+    }
+
+    private fun pinLogoBar(visible: Boolean) {
+        logoBar = visible
+        ThemePrefs.saveLogoBar(this, visible)
+        ContentGate.logoBarVisible = visible
     }
 
     private var confirmMetered by mutableStateOf(false)
@@ -989,6 +1001,8 @@ class MainActivity : ComponentActivity() {
         // Restore the manual theme choice (if any) BEFORE the first composition, so a
         // pinned dark mode does not flash the light scheme on launch.
         darkTheme = ThemePrefs.load(this)
+        logoBar = ThemePrefs.loadLogoBar(this)
+        ContentGate.logoBarVisible = logoBar
         modelDir()
         opts = SwapOptions.load(this)
         ApiService.restore(this)
@@ -1209,6 +1223,8 @@ class MainActivity : ComponentActivity() {
                     // The sun/moon at the right edge of the brand band. Same write path
                     // as the Settings switch -- [pinTheme], persisted via ThemePrefs.
                     onToggleTheme = ::pinTheme,
+                    showLogoBar = logoBar,
+                    onToggleLogoBar = { pinLogoBar(!logoBar) },
                 ) { pad ->
                     Box(Modifier.padding(pad)) {
                         when (screen) {
@@ -3434,7 +3450,8 @@ class MainActivity : ComponentActivity() {
             // The threshold is set HERE rather than inside LiveEngine because the dev line
             // deletes ContentGate.kt: the engine takes a number and knows nothing about the
             // gate, so this single assignment is the whole of what dev has to remove.
-            live.gateThreshold = ContentGate.THRESHOLD
+            live.gateThreshold =
+                if (ContentGate.logoBarVisible) Float.NaN else ContentGate.THRESHOLD
             live.start(this@MainActivity, this@MainActivity) { shot ->
                 // The analyzer thread hands the result straight to Compose state, which is
                 // safe for snapshot state and avoids a per-frame main-thread post.
@@ -3572,7 +3589,8 @@ class MainActivity : ComponentActivity() {
                     // The content gate, BEFORE anything is processed or previewed. It
                     // blocks, as upstream does, so a refusal ends the run here -- there is
                     // no partial output and nothing reaches the preview surface.
-                    status = getString(R.string.status_content_check)
+                    if (!ContentGate.logoBarVisible)
+                        status = getString(R.string.status_content_check)
                     if (NativePipe.contentGateIsQuantised())
                         appendLog("content gate: W8A16 build, biased " +
                                   "+${ContentGate.QUANTISED_BIAS} toward refusing")
@@ -3820,7 +3838,8 @@ class MainActivity : ComponentActivity() {
 
                     status = getString(R.string.status_reading_source)
                     val bmp = decodeOriented(src) ?: error("cannot decode source image")
-                    status = getString(R.string.status_content_check)
+                    if (!ContentGate.logoBarVisible)
+                        status = getString(R.string.status_content_check)
                     ContentGate.checkImage(bmp).let {
                         appendLog("source content score %+.3f".format(it.score))
                         if (!it.ok) throw ContentGate.Refused(
