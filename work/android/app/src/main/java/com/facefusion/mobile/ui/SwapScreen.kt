@@ -1476,104 +1476,112 @@ fun SwapScreen(
             val clickable = busy || run.canCancel || canRun
             // 只有真正缺条件才置灰；preparing 期间按钮保持品牌色，只是暂时不可点。
             val dimmed = !clickable && (!ready || batchDone)
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(56.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    // The button's fill matches the other controls (surface, like the
-                    // SectionCards), not the page background. Its identity comes from the
-                    // border (outlineVariant) and the text weight, exactly like the
-                    // processor chips; only a running swap shows the error border. The
-                    // dimmed state keeps the same fill, just muted text.
-                    .background(MaterialTheme.colorScheme.surface)
-                    .border(
-                        1.dp,
-                        if (busy) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.outlineVariant,
-                        RoundedCornerShape(16.dp),
-                    )
-                    .clickable(enabled = clickable) {
-                        if (busy || run.canCancel) onCancel() else onSwap()
-                    },
-                contentAlignment = Alignment.Center,
+            val playEnabled = hasSource && hasTarget && idle && !modelsMissing &&
+                batch.size <= 1
+            val playDimmed = !playEnabled
+            @Composable
+            fun ActionCell(
+                modifier: Modifier = Modifier,
+                enabled: Boolean,
+                dimmed: Boolean,
+                busyBorder: Boolean = false,
+                onClick: () -> Unit,
+                content: @Composable () -> Unit,
             ) {
+                Box(
+                    modifier
+                        .height(56.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .border(
+                            1.dp,
+                            if (busyBorder) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.outlineVariant,
+                            RoundedCornerShape(16.dp),
+                        )
+                        .clickable(enabled = enabled, onClick = onClick),
+                    contentAlignment = Alignment.Center,
+                ) { content() }
+            }
+            Column(Modifier.fillMaxWidth()) {
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                    Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    if (!busy) {
-                        Icon(
-                            Icons.Default.PlayArrow,
-                            stringResource(R.string.swap_action),
-                            Modifier.size(22.dp),
-                            // Dim the icon with the text when conditions are truly missing;
-                            // otherwise it follows the label colour.
-                            tint = if (dimmed) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.69f)
-                                   else MaterialTheme.colorScheme.onBackground,
-                        )
-                    }
-                    Text(
-                        stringResource(
-                            if (busy || run.canCancel) R.string.swap_cancel
-                            else if (batch.size > 1 && !batchDone) R.string.swap_action_batch
-                            else R.string.swap_action,
-                            batch.size,
-                        ),
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = 0.5.sp,
-                        color = when {
-                            busy -> MaterialTheme.colorScheme.error
-                            // Not clickable: mute the label itself, 31 % lighter than normal.
-                            dimmed -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.69f)
-                            else -> MaterialTheme.colorScheme.onBackground
+                    ActionCell(
+                        modifier = Modifier.weight(2f),
+                        enabled = clickable,
+                        dimmed = dimmed,
+                        busyBorder = busy,
+                        onClick = {
+                            if (busy || run.canCancel) onCancel() else onSwap()
                         },
-                    )
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            if (!busy) {
+                                Icon(
+                                    Icons.Default.PlayArrow,
+                                    stringResource(R.string.swap_action),
+                                    Modifier.size(22.dp),
+                                    tint = if (dimmed) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.69f)
+                                           else MaterialTheme.colorScheme.onBackground,
+                                )
+                            }
+                            Text(
+                                stringResource(
+                                    if (busy || run.canCancel) R.string.swap_cancel
+                                    else if (batch.size > 1 && !batchDone) R.string.swap_action_batch
+                                    else R.string.swap_action,
+                                    batch.size,
+                                ),
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                letterSpacing = 0.5.sp,
+                                color = when {
+                                    busy -> MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
+                                    dimmed -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.69f)
+                                    else -> MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f)
+                                },
+                            )
+                        }
+                    }
+                    ActionCell(
+                        modifier = Modifier.weight(1f),
+                        enabled = playEnabled,
+                        dimmed = playDimmed,
+                        onClick = onLivePlay,
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.PlayArrow,
+                                stringResource(R.string.player_action),
+                                Modifier.size(22.dp),
+                                tint = if (playDimmed) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.69f)
+                                       else MaterialTheme.colorScheme.onBackground,
+                            )
+                            Text(
+                                stringResource(R.string.player_action),
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                letterSpacing = 0.5.sp,
+                                color = if (playDimmed) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.69f)
+                                        else MaterialTheme.colorScheme.onBackground.copy(alpha = 0.9f),
+                            )
+                        }
+                    }
                 }
+                if (batch.size > 1) Text(
+                    stringResource(R.string.player_batch_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-        }
-
-        // THE LIVE PLAYER: the target clip through the pipeline at whatever rate the phone
-        // manages, with its own sound, instead of waiting for a whole render. It sits under
-        // Swap because it is an ALTERNATIVE to pressing Swap -- same pipeline, same
-        // options, no output file.
-        //
-        // ⚠ It used to be behind `BuildConfig.DEV_BUILD`, and what took it off that flag is
-        // `MainActivity.startPlayer` growing a check of its own, NOT this condition. A
-        // button drawn or not drawn is an appearance; the guarantee is at the place the
-        // processing starts, which is where the seventh path was added.
-        //
-        // ⚠ A CONTAINER, not bare text. Both of these were TextButtons -- a word floating
-        // under the one real button, with no shape to say they could be pressed at all.
-        // They are TONAL rather than filled, and 46 dp against Swap's 52: there is one
-        // primary action on this screen and these are the two alternatives to it, so they
-        // have to read as buttons without reading as the same button. The theme is
-        // monochrome on purpose, so the weight comes from the secondaryContainer fill and
-        // the 14 dp shape, never from a second accent colour.
-        if (hasSource && hasTarget && !imageTarget && idle &&
-            !modelsMissing) {
-            // ⚠ DISABLED once a QUEUE exists. The player runs the one visible clip, and
-            // Swap next to it would run all of them -- so with a queue built the two
-            // buttons stop being alternatives and the player silently becomes "preview the
-            // first one". Left DRAWN rather than hidden: a control that vanishes when you
-            // add a clip reads as a bug, and the caption says which it is.
-            val queued = batch.size > 1
-            FilledTonalButton(
-                onLivePlay,
-                enabled = !queued,
-                modifier = Modifier.fillMaxWidth().height(46.dp),
-                shape = RoundedCornerShape(14.dp),
-            ) {
-                Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.player_action))
-            }
-            if (queued) Text(
-                stringResource(R.string.player_batch_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
 
         // Only when there is something to report. It used to carry a standing
@@ -1616,6 +1624,7 @@ fun SwapScreen(
                 collapsible = true,
                 expanded = outputResultExpanded,
                 onToggle = { outputResultExpanded = !outputResultExpanded },
+                floating = false,
                 trailing = {
             if (hasOutput && !outputAutoSaved) {
                 // The batch's save-all state, derived from the queue itself: the entry
@@ -1834,7 +1843,8 @@ fun SwapScreen(
 
         // ---------------------------------------------------------------- log
         if (log.isNotEmpty()) LogBox(log, expanded = logExpanded,
-                                     onToggle = { logExpanded = !logExpanded })
+                                     onToggle = { logExpanded = !logExpanded },
+                                     floating = false)
 
         Spacer(Modifier.height(8.dp))
     }

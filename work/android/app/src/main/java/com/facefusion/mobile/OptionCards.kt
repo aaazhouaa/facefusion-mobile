@@ -39,8 +39,9 @@ fun OptionCard(
     summary: String,
     expanded: Boolean,
     onToggle: () -> Unit,
+    overlayUp: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
-) = Accordion(title, summary, expanded, onToggle, content = content)
+) = Accordion(title, summary, expanded, onToggle, overlayUp = overlayUp, content = content)
 
 /** A labelled slider. Value sits beside the label; the track gets the full width. */
 @Composable

@@ -147,6 +147,7 @@ fun LiveScreen(
             collapsible = true,
             expanded = sourcesOpen,
             onToggle = { sourcesOpen = !sourcesOpen },
+            floating = false,
             trailing = {
                 if (!running) {
                     // 20 dp, the SAME height as the fold chevron beside it: both caption
@@ -546,6 +547,7 @@ fun LiveScreen(
             collapsible = true,
             expanded = settingsOpen,
             onToggle = { settingsOpen = !settingsOpen },
+            floating = false,
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

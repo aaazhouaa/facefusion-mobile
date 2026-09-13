@@ -96,7 +96,7 @@
     <string name="swap_rate_hint_every">every frame of the source</string>
     <string name="swap_rate_hint_drop">drops frames before the swap, so it is faster too</string>
 
-    <string name="swap_action">Swap</string>
+    <string name="swap_action">Start</string>
     <string name="swap_cancel">Cancel</string>
     <!-- %1$d done, %2$d total, %3$s frames per second, %4$d seconds remaining -->
     <string name="swap_progress">Frame %1$d / %2$d   %3$s fps   ETA %4$ds</string>
@@ -129,7 +129,7 @@
          Shown only when BuildConfig.DEV_BUILD is true. They are translated anyway:
          the dev line is a build of the same app, and a half-translated screen is
          harder to read than an untranslated one. -->
-    <string name="player_action">Play with live swap</string>
+    <string name="player_action">Play</string>
     <string name="player_starting">Starting…</string>
     <string name="player_landscape">Landscape</string>
     <string name="player_close">Close</string>

@@ -69,7 +69,7 @@
     <string name="swap_rate_hint_every">каждый кадр исходника</string>
     <string name="swap_rate_hint_drop">отбрасывает кадры до замены, поэтому ещё и быстрее</string>
 
-    <string name="swap_action">Заменить</string>
+    <string name="swap_action">Старт</string>
     <string name="swap_cancel">Отмена</string>
     <string name="swap_progress">Кадр %1$d / %2$d   %3$s fps   осталось %4$d с</string>
     <string name="swap_share_bug_report">Отправить отчёт об ошибке</string>
@@ -93,7 +93,7 @@
     <string name="out_expand">Развернуть</string>
     <string name="out_collapse">Свернуть</string>
 
-    <string name="player_action">Воспроизвести с живой заменой</string>
+    <string name="player_action">Играть</string>
     <string name="player_starting">Запуск…</string>
     <string name="player_landscape">Альбомная ориентация</string>
     <string name="player_close">Закрыть</string>

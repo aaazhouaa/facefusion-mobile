@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.composed
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -35,6 +36,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.font.FontWeight
@@ -44,6 +47,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import com.facefusion.mobile.R
 import kotlinx.coroutines.delay
 import java.io.File
@@ -167,62 +172,111 @@ fun SectionCard(
     collapsible: Boolean = false,
     expanded: Boolean = true,
     onToggle: (() -> Unit)? = null,
+    // Overlay the body instead of growing the page. [overlayUp] opens above the header.
+    floating: Boolean = true,
+    overlayUp: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Column(
-        modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp))
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.then(
-                if (onToggle != null) Modifier
-                    // Slightly larger than the visual title so the whole band is easy to
-                    // hit, but not full-width-bleed: the card's own padding already frames
-                    // it, and an 100%-wide target would make accidental collapses common.
-                    .clip(RoundedCornerShape(10.dp))
-                    .clickable(onClick = onToggle)
-                    .padding(vertical = 2.dp)
-                else Modifier
-            ),
+    val overlay = collapsible && onToggle != null && floating
+    var headerW by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    Box(modifier.fillMaxWidth()) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .onGloballyPositioned { headerW = it.size.width }
+                .clip(RoundedCornerShape(20.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(20.dp))
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Box(
-                Modifier
-                    .size(10.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(MaterialTheme.colorScheme.primary),
+            SectionCardHeader(
+                title = title,
+                trailing = trailing,
+                collapsible = collapsible,
+                expanded = expanded,
+                onToggle = onToggle,
             )
-            Spacer(Modifier.width(8.dp))
-            Caption(title, Modifier.weight(1f))
-            trailing()
-            if (collapsible) {
-                Spacer(Modifier.width(6.dp))
-                Icon(
-                    Icons.Default.KeyboardArrowDown,
-                    stringResource(if (expanded) R.string.common_collapse
-                                   else R.string.common_expand),
+            if (!overlay && expanded) content()
+        }
+        if (overlay && expanded) {
+            Popup(
+                alignment = if (overlayUp) Alignment.BottomCenter else Alignment.TopCenter,
+                onDismissRequest = { onToggle?.invoke() },
+                properties = PopupProperties(focusable = true),
+            ) {
+                Column(
                     Modifier
-                        .size(20.dp)
-                        .rotate(if (expanded) 0f else 180f),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                        .width(
+                            with(density) { headerW.toDp() }.takeIf { headerW > 0 }
+                                ?: Dp.Unspecified
+                        )
+                        .shadow(12.dp, RoundedCornerShape(20.dp))
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.outlineVariant,
+                            RoundedCornerShape(20.dp),
+                        )
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    if (overlayUp) content()
+                    SectionCardHeader(
+                        title = title,
+                        trailing = trailing,
+                        collapsible = true,
+                        expanded = true,
+                        onToggle = onToggle,
+                    )
+                    if (!overlayUp) content()
+                }
             }
         }
-        // Plain `if`, deliberately NOT AnimatedVisibility.
-        //
-        // ⚠ The animated version caused a real overlap: inside the page's verticalScroll,
-        // expanding a card that holds sliders (the trim card's RangeSlider carries a 48 dp
-        // touch target) could leave the drawn content overlapping the elements below it --
-        // the "expanded but contents overlap and can't be used" report. A conditional
-        // render has no transition in which measured height and drawn height disagree,
-        // so the overlap cannot happen. The chevron above still rotates, which keeps the
-        // fold affordance's motion.
-        if (expanded) content()
+    }
+}
+
+@Composable
+private fun SectionCardHeader(
+    title: String,
+    trailing: @Composable RowScope.() -> Unit,
+    collapsible: Boolean,
+    expanded: Boolean,
+    onToggle: (() -> Unit)?,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.then(
+            if (onToggle != null) Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(onClick = onToggle)
+                .padding(vertical = 2.dp)
+            else Modifier
+        ),
+    ) {
+        Box(
+            Modifier
+                .size(10.dp)
+                .clip(RoundedCornerShape(3.dp))
+                .background(MaterialTheme.colorScheme.primary),
+        )
+        Spacer(Modifier.width(8.dp))
+        Caption(title, Modifier.weight(1f))
+        trailing()
+        if (collapsible) {
+            Spacer(Modifier.width(6.dp))
+            Icon(
+                Icons.Default.KeyboardArrowDown,
+                stringResource(if (expanded) R.string.common_collapse
+                               else R.string.common_expand),
+                Modifier
+                    .size(20.dp)
+                    .rotate(if (expanded) 0f else 180f),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -1163,42 +1217,93 @@ fun Accordion(
     expanded: Boolean,
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
+    floating: Boolean = true,
+    overlayUp: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val angle by animateFloatAsState(if (expanded) 180f else 0f, label = "chevron")
-    Card(modifier.fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-            Row(
-                Modifier.fillMaxWidth().clickable(onClick = onToggle),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(title, style = MaterialTheme.typography.titleSmall)
-                    if (!summary.isNullOrEmpty())
-                        Text(
-                            summary,
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                }
-                Icon(
-                    Icons.Default.KeyboardArrowDown,
-                    stringResource(if (expanded) R.string.out_collapse else R.string.out_expand),
-                    Modifier.rotate(angle),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            // Same plain conditional as SectionCard: a transition here can draw the
-            // content over the elements below it inside a scrolling container.
-            if (expanded) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Spacer(Modifier.height(4.dp))
-                    content()
+    var headerW by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    Box(modifier.fillMaxWidth()) {
+        Card(
+            Modifier
+                .fillMaxWidth()
+                .onGloballyPositioned { headerW = it.size.width },
+        ) {
+            Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                AccordionHeader(title, summary, expanded, onToggle, angle)
+                if (expanded && !floating) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Spacer(Modifier.height(4.dp))
+                        content()
+                    }
                 }
             }
         }
+        if (expanded && floating) {
+            Popup(
+                alignment = if (overlayUp) Alignment.BottomCenter else Alignment.TopCenter,
+                onDismissRequest = onToggle,
+                properties = PopupProperties(focusable = true),
+            ) {
+                Card(
+                    Modifier
+                        .width(
+                            with(density) { headerW.toDp() }.takeIf { headerW > 0 }
+                                ?: Dp.Unspecified
+                        )
+                        .shadow(12.dp, RoundedCornerShape(12.dp)),
+                ) {
+                    Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                        if (overlayUp) {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                content()
+                                Spacer(Modifier.height(4.dp))
+                            }
+                        }
+                        AccordionHeader(title, summary, true, onToggle, 180f)
+                        if (!overlayUp) {
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Spacer(Modifier.height(4.dp))
+                                content()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccordionHeader(
+    title: String,
+    summary: String?,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    angle: Float,
+) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onToggle),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            if (!summary.isNullOrEmpty())
+                Text(
+                    summary,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+        }
+        Icon(
+            Icons.Default.KeyboardArrowDown,
+            stringResource(if (expanded) R.string.out_collapse else R.string.out_expand),
+            Modifier.rotate(angle),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -1220,52 +1325,93 @@ fun LogBox(
     expanded: Boolean,
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
+    floating: Boolean = true,
 ) {
     val scroll = rememberScrollState()
+    var headerW by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
     // Follow the tail, which is the only part anyone reads while a run is going. Keyed on
     // `expanded` too: a collapsed box does not scroll, so re-opening it has to catch up.
     LaunchedEffect(text, expanded) {
         if (expanded) scroll.animateScrollTo(scroll.maxValue)
     }
-    Column(modifier.fillMaxWidth()) {
-        // The caption IS the toggle -- the whole row, not just the chevron, so the target
-        // is the width of the screen rather than 20 dp.
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
-                .clickable(onClick = onToggle)
-                .padding(vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Caption(stringResource(R.string.out_log), Modifier.weight(1f))
-            Icon(
-                Icons.Default.KeyboardArrowDown,
-                stringResource(if (expanded) R.string.common_collapse
-                               else R.string.common_expand),
-                Modifier
-                    .size(20.dp)
-                    .rotate(if (expanded) 0f else 180f),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        // Plain `if`, not AnimatedVisibility: this sits inside the screen's verticalScroll,
-        // where a transition can draw the panel over what follows it mid-flight.
-        if (expanded) {
-            Surface(
-                Modifier.fillMaxWidth().height(170.dp).padding(top = 4.dp),
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant,
-            ) {
-                Text(
-                    text,
-                    Modifier.verticalScroll(scroll).padding(12.dp),
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 10.sp,
-                    lineHeight = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+    Box(
+        modifier
+            .fillMaxWidth()
+            .onGloballyPositioned { headerW = it.size.width },
+    ) {
+        Column(Modifier.fillMaxWidth()) {
+            LogBoxHeader(expanded = expanded, onToggle = onToggle)
+            if (expanded && !floating) {
+                Surface(
+                    Modifier.fillMaxWidth().height(170.dp).padding(top = 4.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                ) {
+                    Text(
+                        text,
+                        Modifier.verticalScroll(scroll).padding(12.dp),
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 10.sp,
+                        lineHeight = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
+        if (expanded && floating) {
+            Popup(
+                alignment = Alignment.TopCenter,
+                onDismissRequest = onToggle,
+                properties = PopupProperties(focusable = true),
+            ) {
+                Column(
+                    Modifier.width(
+                        with(density) { headerW.toDp() }.takeIf { headerW > 0 }
+                            ?: Dp.Unspecified
+                    ),
+                ) {
+                    LogBoxHeader(expanded = true, onToggle = onToggle)
+                    Surface(
+                        Modifier.fillMaxWidth().height(170.dp).padding(top = 4.dp)
+                            .shadow(12.dp, RoundedCornerShape(12.dp)),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                    ) {
+                        Text(
+                            text,
+                            Modifier.verticalScroll(scroll).padding(12.dp),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp,
+                            lineHeight = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LogBoxHeader(expanded: Boolean, onToggle: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onToggle)
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Caption(stringResource(R.string.out_log), Modifier.weight(1f))
+        Icon(
+            Icons.Default.KeyboardArrowDown,
+            stringResource(if (expanded) R.string.common_collapse
+                           else R.string.common_expand),
+            Modifier
+                .size(20.dp)
+                .rotate(if (expanded) 0f else 180f),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
