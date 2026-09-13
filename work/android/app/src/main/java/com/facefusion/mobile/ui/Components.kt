@@ -688,6 +688,7 @@ fun FaceTile(
      * tile is the target picker first, a face picker second.
      */
     onPickFace: ((Float, Float) -> Unit)? = null,
+    footer: (@Composable () -> Unit)? = null,
 ) {
     if (fill) {
         // The voice tile: same bottom-pinned icon column as the compact tiles, but
@@ -756,6 +757,8 @@ fun FaceTile(
                     ),
                 contentAlignment = Alignment.Center,
             ) {
+                Box(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 if (bitmap != null) {
                     // FULL-BLEED, no inset: the bitmap covers the whole 72 dp square. The
                     // square's own clip rounds the image, so there is no frame, no border
@@ -824,6 +827,9 @@ fun FaceTile(
                             modifier = Modifier.padding(horizontal = 6.dp),
                         )
                     }
+                }
+                }
+                Box(Modifier.align(Alignment.BottomStart)) { footer?.invoke() }
                 }
             }
             // Small actions (camera, change, delete…), stacked in a column just 3 dp

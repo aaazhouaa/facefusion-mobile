@@ -23,6 +23,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.facefusion.mobile.R
@@ -47,25 +48,44 @@ fun SourceRow(
     onSelect: (Int) -> Unit,
     onKeepOriginal: (() -> Unit)? = null,
     enabled: Boolean = true,
+    showLabels: Boolean = true,
+    tileSize: Dp = 72.dp,
     modifier: Modifier = Modifier,
 ) {
     if (thumbs.isEmpty()) return
     Row(
         modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         if (onKeepOriginal != null) {
+            val keepLabel = stringResource(R.string.assign_keep_original)
             Tile(
-                label = stringResource(R.string.assign_keep_original),
+                label = keepLabel,
                 selected = keepOriginalBrush,
                 enabled = enabled,
+                showLabel = false,
+                tileSize = tileSize,
                 onClick = onKeepOriginal,
             ) {
                 Icon(
                     painterResource(R.drawable.ic_person_off),
-                    contentDescription = null,
+                    contentDescription = keepLabel,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(26.dp),
+                )
+                Text(
+                    keepLabel,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.82f))
+                        .padding(horizontal = 2.dp, vertical = 2.dp),
                 )
             }
         }
@@ -75,6 +95,8 @@ fun SourceRow(
                 label = label,
                 selected = index == active && !keepOriginalBrush,
                 enabled = enabled,
+                showLabel = showLabels,
+                tileSize = tileSize,
                 onClick = { onSelect(index) },
             ) {
                 Image(
@@ -95,35 +117,40 @@ private fun Tile(
     selected: Boolean,
     enabled: Boolean,
     onClick: () -> Unit,
-    content: @Composable () -> Unit,
+    showLabel: Boolean = true,
+    tileSize: Dp = 72.dp,
+    content: @Composable BoxScope.() -> Unit,
 ) {
-    val shape = RoundedCornerShape(10.dp)
+    val shape = RoundedCornerShape(12.dp)
     Column(
-        Modifier.width(72.dp).clickable(enabled = enabled, onClick = onClick),
+        Modifier.width(tileSize).clickable(enabled = enabled, onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
             Modifier
-                .size(62.dp)
+                .size(tileSize)
                 .clip(shape)
                 .background(MaterialTheme.colorScheme.surfaceVariant)
                 .border(
                     BorderStroke(
-                        if (selected) 3.dp else 1.dp,
-                        if (selected) FfRed else MaterialTheme.colorScheme.outlineVariant,
+                        if (selected) 2.dp else 1.dp,
+                        if (selected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.outlineVariant,
                     ),
                     shape,
                 ),
             contentAlignment = Alignment.Center,
         ) { content() }
-        Text(
-            label,
-            fontSize = 10.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = TextAlign.Center,
-            color = if (selected) MaterialTheme.colorScheme.onSurface
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (showLabel) {
+            Text(
+                label,
+                fontSize = 10.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                color = if (selected) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }

@@ -18,12 +18,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -32,6 +34,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -41,14 +45,19 @@ import com.facefusion.mobile.displayThumb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import com.facefusion.mobile.FaceDetectorCard
 import com.facefusion.mobile.FaceMaskerCard
 import com.facefusion.mobile.FaceSwapperCard
@@ -361,6 +370,8 @@ fun SwapScreen(
     // folded card is not a silent one. The state is saved so a rotation does not silently
     // re-open a row the user just folded away.
     var processorsExpanded by rememberSaveable { mutableStateOf(false) }
+    var sourcePickerExpanded by rememberSaveable { mutableStateOf(false) }
+    var inputRowW by remember { mutableIntStateOf(0) }
     // Output settings live on ONE foldable card, default CLOSED: "Clip" (the trim) is the
     // first item, followed by output size and frame rate -- per-run tuning that should not
     // push the Swap button off the first screen.
@@ -561,15 +572,7 @@ fun SwapScreen(
                         // app never reaches this row without it.
                         model = "",
                         installed = true, on = true, available = true, onToggle = {},
-                        // Opens with the Face Swapper card already expanded, so the
-                        // weight slider -- the knob most runs actually touch -- is there
-                        // on arrival rather than one tap further in. Only when nothing
-                        // else is open, so a card the user deliberately left open on a
-                        // previous visit is respected.
-                        onSettings = {
-                            settingsFor = "swapper"
-                            if (openCard.isEmpty()) onToggleCard("swapper")
-                        },
+                        onSettings = { settingsFor = "swapper" },
                     )
                     ProcessorChip(
                         name = stringResource(R.string.swap_proc_enhancer),
@@ -725,7 +728,9 @@ fun SwapScreen(
         // with FaceTile's own 16 dp rounded surface -- the group reads as one input row
         // while every tile keeps its own frame.
         Row(
-            Modifier.fillMaxWidth(),
+            Modifier
+                .fillMaxWidth()
+                .onGloballyPositioned { inputRowW = it.size.width },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -764,6 +769,184 @@ fun SwapScreen(
                             }
                         }
                     },
+                    footer = if (hasSource) {
+                        {
+                            Box(Modifier.padding(start = 4.dp, bottom = 2.dp)) {
+                                Icon(
+                                    Icons.Default.KeyboardArrowDown,
+                                    stringResource(if (sourcePickerExpanded) R.string.common_collapse
+                                                   else R.string.common_expand),
+                                    Modifier
+                                        .size(18.dp)
+                                        .rotate(if (sourcePickerExpanded) 0f else 180f)
+                                        .clickable { sourcePickerExpanded = !sourcePickerExpanded },
+                                    tint = Color.White,
+                                )
+                                if (sourcePickerExpanded) {
+                                    val density = LocalDensity.current
+                                    val sheetW = with(density) {
+                                        inputRowW.toDp().takeIf { inputRowW > 0 } ?: Dp.Unspecified
+                                    }
+                                    val sheetShape = RoundedCornerShape(20.dp)
+                                    val childShape = RoundedCornerShape(16.dp)
+                                    val childBorder = Modifier.border(
+                                        1.dp,
+                                        MaterialTheme.colorScheme.outlineVariant,
+                                        childShape,
+                                    )
+                                    // Arrow is now at the tile's left, so the sheet's centre
+                                    // is rowCentre minus the arrow's centre (~13 dp).
+                                    val dx = with(density) {
+                                        (inputRowW / 2f - 13.dp.toPx()).roundToInt()
+                                    }
+                                    Popup(
+                                        alignment = Alignment.TopCenter,
+                                        offset = IntOffset(
+                                            dx,
+                                            with(density) { 22.dp.roundToPx() },
+                                        ),
+                                        onDismissRequest = { sourcePickerExpanded = false },
+                                        properties = PopupProperties(focusable = true),
+                                    ) {
+                                        Column(
+                                            Modifier
+                                                .width(sheetW)
+                                                .shadow(12.dp, sheetShape)
+                                                .clip(sheetShape)
+                                                .background(MaterialTheme.colorScheme.surface)
+                                                .border(
+                                                    1.dp,
+                                                    MaterialTheme.colorScheme.outlineVariant,
+                                                    sheetShape,
+                                                )
+                                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                                        ) {
+                                            Column(
+                                                Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(childShape)
+                                                    .then(childBorder)
+                                                    .padding(horizontal = 10.dp, vertical = 10.dp),
+                                            ) {
+                                                SourceRow(
+                                                    thumbs = sourceThumbs,
+                                                    active = activeSource,
+                                                    keepOriginalBrush = keepOriginalBrush,
+                                                    onSelect = onSelectSource,
+                                                    onKeepOriginal = if (assignMode) onKeepOriginal else null,
+                                                    enabled = idle,
+                                                    showLabels = false,
+                                                    tileSize = 60.dp,
+                                                )
+                                            }
+                                            if (!imageTarget && hasTarget && sourceThumbs.isNotEmpty()) {
+                                                Column(
+                                                    Modifier
+                                                        .fillMaxWidth()
+                                                        .clip(childShape)
+                                                        .then(childBorder)
+                                                        .padding(horizontal = 10.dp, vertical = 10.dp),
+                                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                                ) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Column(Modifier.weight(1f)) {
+                                                            Text(
+                                                                stringResource(R.string.live_assign_title),
+                                                                style = MaterialTheme.typography.bodyMedium,
+                                                            )
+                                                            Text(
+                                                                stringResource(
+                                                                    if (assignMode) R.string.swap_assign_on
+                                                                    else R.string.swap_assign_off),
+                                                                style = MaterialTheme.typography.bodySmall,
+                                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            )
+                                                        }
+                                                        if (assignMode && personAssignments.isNotEmpty()) {
+                                                            TextButton(
+                                                                onClick = onClearAssignments,
+                                                                enabled = idle,
+                                                            ) {
+                                                                Text(stringResource(R.string.live_assign_clear))
+                                                            }
+                                                        }
+                                                        Switch(
+                                                            checked = assignMode,
+                                                            onCheckedChange = { onToggleAssignMode() },
+                                                            enabled = idle,
+                                                            modifier = Modifier.alpha(
+                                                                if (assignMode) 0.69f else 1f),
+                                                        )
+                                                    }
+                                                    if (assignMode) {
+                                                        Text(
+                                                            stringResource(
+                                                                if (personThumbs.isEmpty())
+                                                                    R.string.swap_assign_no_people
+                                                                else R.string.swap_assign_hint),
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        )
+                                                        Row(
+                                                            Modifier
+                                                                .fillMaxWidth()
+                                                                .horizontalScroll(rememberScrollState()),
+                                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                        ) {
+                                                            personThumbs.forEachIndexed { index, thumb ->
+                                                                val label = stringResource(
+                                                                    R.string.swap_assign_person,
+                                                                    index + 1,
+                                                                )
+                                                                val personShape = RoundedCornerShape(12.dp)
+                                                                val selected = index == selectedPerson
+                                                                Box(
+                                                                    Modifier.clickable(enabled = idle) {
+                                                                        onSelectPerson(index)
+                                                                    },
+                                                                ) {
+                                                                    Image(
+                                                                        thumb.asImageBitmap(),
+                                                                        contentDescription = label,
+                                                                        modifier = Modifier
+                                                                            .size(60.dp)
+                                                                            .clip(personShape)
+                                                                            .border(
+                                                                                BorderStroke(
+                                                                                    if (selected) 2.dp else 1.dp,
+                                                                                    if (selected) MaterialTheme.colorScheme.primary
+                                                                                    else MaterialTheme.colorScheme.outlineVariant,
+                                                                                ),
+                                                                                personShape),
+                                                                        contentScale = ContentScale.Crop,
+                                                                    )
+                                                                    personAssignments[index]?.let { slot ->
+                                                                        Text(
+                                                                            if (slot < 0)
+                                                                                stringResource(R.string.swap_assign_badge_keep)
+                                                                            else (slot + 1).toString(),
+                                                                            color = Color.White,
+                                                                            fontSize = 9.sp,
+                                                                            modifier = Modifier
+                                                                                .align(Alignment.BottomEnd)
+                                                                                .padding(
+                                                                                    horizontal = 4.dp,
+                                                                                    vertical = 2.dp),
+                                                                        )
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else null,
                 )
                 // ⇒ marks the direction of the swap: the source face BECOMES the
                 // target. The Row's verticalAlignment centres it between the two tiles.
@@ -934,104 +1117,6 @@ fun SwapScreen(
         }
         val resultH: Dp = h
         val resultW: Dp? = wResult
-
-        // EVERY source, under the pane that shows the selected one. The same row Live
-        // draws, from the same list: picking a face on either screen makes it available
-        // on both, which is what one shared list means for the person using it.
-        SourceRow(
-            thumbs = sourceThumbs,
-            active = activeSource,
-            keepOriginalBrush = keepOriginalBrush,
-            onSelect = onSelectSource,
-            onKeepOriginal = if (assignMode) onKeepOriginal else null,
-            enabled = idle,
-        )
-
-        // ---- ASSIGN PER PERSON. Video targets only: a still is one frame the user is
-        // already looking at, and the pane IS the result, so there is nothing the mode
-        // could do there that tapping a target face does not already do.
-        if (!imageTarget && hasTarget && sourceThumbs.isNotEmpty()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.live_assign_title),
-                         style = MaterialTheme.typography.bodyMedium)
-                    Text(stringResource(if (assignMode) R.string.swap_assign_on
-                                        else R.string.swap_assign_off),
-                         style = MaterialTheme.typography.bodySmall,
-                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                if (assignMode && personAssignments.isNotEmpty()) {
-                    TextButton(onClick = onClearAssignments, enabled = idle) {
-                        Text(stringResource(R.string.live_assign_clear))
-                    }
-                }
-                // One source plus "keep the original face" is already useful: it is how
-                // you swap everyone EXCEPT somebody.
-                Switch(checked = assignMode,
-                       onCheckedChange = { onToggleAssignMode() },
-                       enabled = idle)
-            }
-            if (assignMode) {
-                Text(stringResource(if (personThumbs.isEmpty())
-                                        R.string.swap_assign_no_people
-                                    else R.string.swap_assign_hint),
-                     style = MaterialTheme.typography.bodySmall,
-                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    personThumbs.forEachIndexed { index, thumb ->
-                        val label = stringResource(R.string.swap_assign_person, index + 1)
-                        Column(
-                            Modifier.width(72.dp).clickable(enabled = idle) {
-                                onSelectPerson(index)
-                            },
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                        ) {
-                            Box {
-                                Image(
-                                    thumb.asImageBitmap(),
-                                    contentDescription = label,
-                                    modifier = Modifier
-                                        .size(62.dp)
-                                        .clip(CircleShape)
-                                        .border(
-                                            BorderStroke(
-                                                if (index == selectedPerson) 3.dp else 1.dp,
-                                                if (index == selectedPerson) FfRed
-                                                else MaterialTheme.colorScheme.outlineVariant,
-                                            ), CircleShape),
-                                    contentScale = ContentScale.Crop,
-                                )
-                                // ROUND faces, SQUARE sources, and a badge saying which
-                                // source each face got -- so the whole mapping is legible
-                                // without tapping anything to find out.
-                                personAssignments[index]?.let { slot ->
-                                    Text(
-                                        if (slot < 0)
-                                            stringResource(R.string.swap_assign_badge_keep)
-                                        else stringResource(
-                                            R.string.swap_assign_badge, slot + 1),
-                                        color = Color.White,
-                                        fontSize = 9.sp,
-                                        modifier = Modifier
-                                            .align(Alignment.BottomEnd)
-                                            .background(FfRed, CircleShape)
-                                            .padding(horizontal = 5.dp, vertical = 1.dp),
-                                    )
-                                }
-                            }
-                            Text(label, fontSize = 10.sp, maxLines = 1,
-                                 overflow = TextOverflow.Ellipsis,
-                                 color = if (index == selectedPerson)
-                                             MaterialTheme.colorScheme.onSurface
-                                         else MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-            }
-        }
 
         // Always shown by default. The placeholder reads as a call to action until the
         // inputs exist, and once they do it is the after half of the before/after.
