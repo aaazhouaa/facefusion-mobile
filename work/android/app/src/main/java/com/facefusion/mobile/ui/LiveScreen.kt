@@ -183,7 +183,8 @@ fun LiveScreen(
                     ) {
                         Icon(
                             Icons.Default.Add, null, Modifier.size(24.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                .copy(alpha = if (running) 0.31f else 1f),
                         )
                     }
                     if (assignMode) {
@@ -203,7 +204,8 @@ fun LiveScreen(
                             Icon(
                                 painterResource(R.drawable.ic_person_off),
                                 contentDescription = stringResource(R.string.assign_keep_original),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    .copy(alpha = if (finalizing) 0.31f else 1f),
                                 modifier = Modifier.size(26.dp),
                             )
                         }

@@ -60,6 +60,8 @@ fun SourceRow(
     ) {
         if (onKeepOriginal != null) {
             val keepLabel = stringResource(R.string.assign_keep_original)
+            // 31% dim while the row is disabled, like every other disabled icon.
+            val keepAlpha = if (enabled) 1f else 0.31f
             Tile(
                 label = keepLabel,
                 selected = keepOriginalBrush,
@@ -71,7 +73,7 @@ fun SourceRow(
                 Icon(
                     painterResource(R.drawable.ic_person_off),
                     contentDescription = keepLabel,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = keepAlpha),
                     modifier = Modifier.size(26.dp),
                 )
                 Text(

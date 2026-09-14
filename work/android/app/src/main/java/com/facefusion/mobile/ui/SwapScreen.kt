@@ -567,7 +567,8 @@ fun SwapScreen(
                                 Modifier
                                     .size(18.dp)
                                     .clip(CircleShape)
-                                    .clickable(enabled = idle) { onSettings() },
+                                    .clickable(enabled = idle) { onSettings() }
+                                    .alpha(if (idle) 1f else 0.31f),
                                 tint = if (active) MaterialTheme.colorScheme.onBackground
                                        else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -670,11 +671,15 @@ fun SwapScreen(
                 )
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onVoicePlayPause, enabled = idle, modifier = Modifier.size(36.dp)) {
+                        // 31% dim when idle, like every other disabled icon on this
+                        // screen; the drawn pause bars share it.
+                        val voiceTint = MaterialTheme.colorScheme.onSurfaceVariant
+                            .copy(alpha = if (idle) 1f else 0.31f)
                         if (voicePlaying) {
                             // Two bars, drawn rather than an icon: the icons artifact this app
                             // carries (material3's transitive icons-core) has PlayArrow but no
                             // Pause, and extended-icons is a heavy addition for one glyph.
-                            val pauseTint = MaterialTheme.colorScheme.onSurfaceVariant
+                            val pauseTint = voiceTint
                             Canvas(Modifier.size(16.dp)) {
                                 val bar = 4.dp.toPx()
                                 val gap = 3.dp.toPx()
@@ -697,7 +702,7 @@ fun SwapScreen(
                             Icon(Icons.Default.PlayArrow,
                                  stringResource(R.string.swap_voice_play),
                                  Modifier.size(20.dp),
-                                 tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                 tint = voiceTint)
                         }
                     }
                     Slider(
@@ -1016,7 +1021,8 @@ fun SwapScreen(
                             IconButton(onCapturePhoto, enabled = idle, modifier = Modifier.size(28.dp)) {
                                 Icon(painterResource(R.drawable.ic_photo_camera),
                                      stringResource(R.string.swap_capture_photo), Modifier.size(16.dp),
-                                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                         .copy(alpha = if (idle) 1f else 0.31f))
                             }
                         }
                     },
@@ -1026,7 +1032,8 @@ fun SwapScreen(
                             IconButton(onCaptureVideo, enabled = idle, modifier = Modifier.size(28.dp)) {
                                 Icon(painterResource(R.drawable.ic_videocam),
                                      stringResource(R.string.swap_capture_video), Modifier.size(16.dp),
-                                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                         .copy(alpha = if (idle) 1f else 0.31f))
                             }
                         }
                         // FACES, the upstream pane's own switch, moved into the tile's
@@ -1038,14 +1045,16 @@ fun SwapScreen(
                                 Icon(Icons.Default.Face,
                                      stringResource(R.string.swap_show_faces),
                                      Modifier.size(16.dp),
-                                     tint = if (showFaceBoxes) FfRed
-                                            else MaterialTheme.colorScheme.onSurfaceVariant)
+                                     tint = (if (showFaceBoxes) FfRed
+                                             else MaterialTheme.colorScheme.onSurfaceVariant)
+                                         .copy(alpha = if (idle) 1f else 0.31f))
                             }
                             // TRASH, on the same bottom edge as the other tiles' delete.
                             IconButton(onClearTarget, enabled = idle, modifier = Modifier.size(28.dp)) {
                                 Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_target),
                                      Modifier.size(16.dp),
-                                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                         .copy(alpha = if (idle) 1f else 0.31f))
                             }
                         }
                     },
@@ -1083,14 +1092,15 @@ fun SwapScreen(
                                      stringResource(if (recordingVoice) R.string.swap_voice_stop
                                                     else R.string.swap_voice_record),
                                      Modifier.size(16.dp),
-                                     tint = if (recordingVoice) MaterialTheme.colorScheme.error
-                                            else MaterialTheme.colorScheme.onSurfaceVariant)
+                                     tint = (if (recordingVoice) MaterialTheme.colorScheme.error
+                                             else MaterialTheme.colorScheme.onSurfaceVariant)
+                                         .copy(alpha = if (idle) 1f else 0.31f))
                             }
                         }
                     },
                     bottomActions = {
                         if (hasVoice && idle) {
-                            IconButton(onClearVoice, modifier = Modifier.size(28.dp)) {
+                            IconButton(onClearVoice, modifier = Modifier.size(28.dp).alpha(if (idle) 1f else 0.31f)) {
                                 Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_voice),
                                      Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
@@ -1209,7 +1219,8 @@ fun SwapScreen(
                                 stringResource(R.string.out_save_frame),
                                 // 同一行触发头的净显示规格：22 dp；与其它图标同色。
                                 Modifier.size(22.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    .copy(alpha = if (idle) 1f else 0.31f),
                             )
                         }
                     }
@@ -1269,7 +1280,8 @@ fun SwapScreen(
                             .clickable(enabled = idle) { onBatchAutoSave(!batchAutoSave) }
                             .padding(6.dp),
                         tint = if (batchAutoSave) MaterialTheme.colorScheme.primary
-                               else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+                               else MaterialTheme.colorScheme.onSurfaceVariant
+                                   .copy(alpha = if (idle) 0.38f else 0.31f),
                     )
                     // 清空全部。32dp 盒、6dp 内边距，净显示 20dp，与触发头同规格；
                     // 队列空时不透明度降到 31%，读作"没有可清的东西"，但仍占着位置。
@@ -1331,7 +1343,8 @@ fun SwapScreen(
                             ) {
                                 Icon(Icons.Default.Add, stringResource(R.string.swap_batch_add),
                                      Modifier.size(28.dp),
-                                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                         .copy(alpha = if (run.busy) 0.31f else 1f))
                             }
                             // 已添加的片段缩略图，64dp，横向排列
                             batch.forEachIndexed { i, item ->
@@ -1873,7 +1886,9 @@ fun SwapScreen(
                     // disabled is a fixed colour at exactly 31% so the dim stays honest.
                     val tint = if (batchMode && !batchSaveAllReady)
                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.31f)
-                               else MaterialTheme.colorScheme.onSurfaceVariant
+                               else if (idle || run.canCancel)
+                                   MaterialTheme.colorScheme.onSurfaceVariant
+                               else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.31f)
                     Icon(
                         IconDownload,
                         stringResource(R.string.swap_save_to_gallery),
@@ -2052,7 +2067,9 @@ fun SwapScreen(
                                        border = BorderStroke(1.dp,
                                                              MaterialTheme.colorScheme.outlineVariant)) {
                             Icon(Icons.Default.Delete, stringResource(R.string.out_delete),
-                                 Modifier.size(18.dp))
+                                 Modifier.size(18.dp),
+                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                     .copy(alpha = if (idle) 1f else 0.31f))
                         }
                     }
                 }
