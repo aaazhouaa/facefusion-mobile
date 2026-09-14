@@ -803,9 +803,6 @@ fun FaceTile(
     /** The tile's picker trigger (the source tile's list glyph, the voice tile's gear),
      *  in the strip under the content; it carries its own sheet. */
     footer: (@Composable () -> Unit)? = null,
-    /** Puts [footer] at the END of the strip instead of the start -- the target tile's
-     *  gear sits at the strip's right, where the source tile's list glyph sits left. */
-    footerTrailing: Boolean = false,
     /**
      * The one tile that stretches (the voice tile, when it carries a `weight`): its
      * content fills the tile's width instead of staying a fixed 72 dp square, so a long
@@ -945,16 +942,15 @@ fun FaceTile(
             }
         }
         // Every icon the tile owns, in one strip under the content. The picker trigger
-        // leads by default (the source's list glyph); [footerTrailing] moves it to the
-        // end instead (the target's gear, at the strip's right).
+        // (the source's list glyph, the voice's gear, the target's gear) leads, so every
+        // tile reads settings first and delete last.
         Row(
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (footer != null && !footerTrailing) footer()
+            if (footer != null) footer()
             actions()
             bottomActions()
-            if (footer != null && footerTrailing) footer()
         }
     }
 }

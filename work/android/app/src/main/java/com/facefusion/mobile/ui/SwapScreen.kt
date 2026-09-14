@@ -799,9 +799,8 @@ fun SwapScreen(
                     // The stage chips used to stand on their own card above this row. They
                     // live behind this gear now: the stages act on the TARGET, so they sit
                     // beside the input they configure (and a fresh screen loses ~160 dp).
-                    // Trailing: the gear closes the strip's right end, mirroring the
-                    // source tile's list glyph at its left.
-                    footerTrailing = true,
+                    // Leading: the gear opens the strip, which leaves the trash at its far
+                    // right -- the same layout the source tile uses, settings before delete.
                     footer = {
                         Box {
                             HintIcon(
