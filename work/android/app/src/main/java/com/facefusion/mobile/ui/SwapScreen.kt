@@ -1270,13 +1270,13 @@ fun SwapScreen(
                         tint = if (batchAutoSave) MaterialTheme.colorScheme.primary
                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
                     )
-                    // 清空全部。20dp 图标，无内边距，与触发头同净显示；队列空时
-                    // 不透明度降到 31%，读作"没有可清的东西"，但仍占着位置。跑批中
-                    // 同样 31%：图标已被禁用，全亮会读作可点。
+                    // 清空全部。32dp 盒、6dp 内边距，净显示 20dp，与触发头同规格；
+                    // 队列空时不透明度降到 31%，读作"没有可清的东西"，但仍占着位置。
+                    // 跑批中同样 31%：图标已被禁用，全亮会读作可点。
                     IconButton(
                         onClearBatch,
                         enabled = idle && batch.isNotEmpty(),
-                        modifier = Modifier.size(20.dp),
+                        modifier = Modifier.size(32.dp),
                     ) {
                         Icon(Icons.Default.Delete,
                              stringResource(R.string.batch_clear_desc),
