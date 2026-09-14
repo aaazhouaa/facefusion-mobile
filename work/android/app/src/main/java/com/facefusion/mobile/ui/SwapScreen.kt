@@ -1200,14 +1200,15 @@ fun SwapScreen(
                     // still out of a clip meant swapping the whole clip first.
                     if (!preview.busy && preview.swapped != null) {
                         IconButton(onClick = onSavePreviewFrame, enabled = idle,
-                                   // The 48 dp touch width leaves ~15 dp of dead air on
-                                   // each side of the 18 dp icon; pull it back toward the
-                                   // label so the gap reads like the text's own padding.
+                                   // The 48 dp touch width leaves dead air around the
+                                   // icon; pull it back toward the label so the gap reads
+                                   // like the text's own padding.
                                    modifier = Modifier.offset(x = (-12).dp)) {
                             Icon(
                                 IconDownload,
                                 stringResource(R.string.out_save_frame),
-                                Modifier.size(18.dp),
+                                // 同一行触发头的净显示规格：22 dp。
+                                Modifier.size(22.dp),
                             )
                         }
                     }
@@ -1247,7 +1248,7 @@ fun SwapScreen(
                         painterResource(R.drawable.ic_playlist_add),
                         stringResource(R.string.swap_batch_menu),
                         Modifier
-                            .size(32.dp)
+                            .size(34.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .clickable {
                                 batchMenuExpanded = !batchMenuExpanded
