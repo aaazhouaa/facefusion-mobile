@@ -16,6 +16,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -23,6 +25,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -136,6 +139,7 @@ data class RunUi(
     val canCancel: Boolean = false,
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SwapScreen(
     sourceThumb: Bitmap?,
@@ -376,6 +380,25 @@ fun SwapScreen(
     // first item, followed by output size and frame rate -- per-run tuning that should not
     // push the Swap button off the first screen.
     var trimExpanded by rememberSaveable { mutableStateOf(false) }
+    // Trim-scrub focus: while a finger presses the clip RangeSlider (tap or drag),
+    // the output-settings dropdown fades its chrome and every row except the slider,
+    // which is redrawn as a bare 3 dp line at 50% -- the preview under the card is
+    // what the range choice is judged against, and the card used to cover it.
+    // Driven three ways on purpose: onValueChange/onValueChangeFinished are the
+    // guaranteed signals (any real tap or drag runs through them); the interaction
+    // source is only a backstop for press-and-hold without movement, whose emission
+    // is an implementation detail of the thumb rendering.
+    var trimScrubbing by remember { mutableStateOf(false) }
+    val trimSliderIx = remember { MutableInteractionSource() }
+    LaunchedEffect(trimSliderIx) {
+        trimSliderIx.interactions.collect { i ->
+            when (i) {
+                is PressInteraction.Press -> trimScrubbing = true
+                is PressInteraction.Release,
+                is PressInteraction.Cancel -> trimScrubbing = false
+            }
+        }
+    }
     // The voice playback and clip/trim controls fold under their own card, below the
     // processors, same default CLOSED: the voice only matters once Lip Sync is on and a
     // clip is loaded, and a standing playback row pushed the inputs further down.
@@ -1197,67 +1220,40 @@ fun SwapScreen(
                     }
                 },
                 // 批量添加标题组（标题+箭头、自动保存、清空）：整组靠右，箭头随
-                // 展开状态翻转，菜单浮层见下方 Popup（居中下拉）。
+                // 批量添加标题组（文本+自动保存开关+清空）：整组靠右；菜单浮层见
+                // 下方 Popup（居中下拉）。无箭头：展开与否由菜单本体自己说明。
                 trailing = {
-                    // 输出设置：原页面下方的折叠卡片，头部现进本组、在批量添加之前；
-                    // 内容以居中浮层挂在窗格锚点上（见下方第二个 Popup）。仅视频目
-                    // 标时出现；与批量菜单互斥，开一个关另一个。
+                    // 输出设置：以"处理器"里 face_swapper 同款的小齿轮作触发头，在
+                    // 批量添加之前；内容以居中浮层挂在窗格锚点上（见下方第二个 Popup）。
+                    // 仅视频目标时出现；与批量菜单互斥，开一个关另一个。
                     if (durationMs > 0) {
-                        Row(
+                        Icon(
+                            Icons.Default.Settings,
+                            stringResource(R.string.swap_output_settings),
                             Modifier
+                                .size(26.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .clickable {
                                     trimExpanded = !trimExpanded
                                     if (trimExpanded) batchMenuExpanded = false
                                 }
-                                .padding(horizontal = 4.dp, vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                stringResource(R.string.swap_output_settings),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 11.sp,
-                            )
-                            Spacer(Modifier.width(2.dp))
-                            Icon(
-                                Icons.Default.KeyboardArrowDown,
-                                stringResource(if (trimExpanded) R.string.common_collapse
-                                               else R.string.common_expand),
-                                Modifier
-                                    .size(20.dp)
-                                    .rotate(if (trimExpanded) 0f else 180f),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                                .padding(4.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                    Row(
-                        Modifier
+                    Text(
+                        stringResource(R.string.swap_batch_menu),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 11.sp,
+                        modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
                             .clickable {
                                 batchMenuExpanded = !batchMenuExpanded
                                 if (batchMenuExpanded) trimExpanded = false
                             }
                             .padding(horizontal = 4.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            stringResource(R.string.swap_batch_menu),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 11.sp,
-                        )
-                        Spacer(Modifier.width(2.dp))
-                        Icon(
-                            Icons.Default.KeyboardArrowDown,
-                            stringResource(if (batchMenuExpanded) R.string.common_collapse
-                                           else R.string.common_expand),
-                            Modifier
-                                .size(20.dp)
-                                .rotate(if (batchMenuExpanded) 0f else 180f),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    )
                     // 自动保存开关。
                     Row(
                         Modifier
@@ -1460,18 +1456,31 @@ fun SwapScreen(
                 ) {
                     Box(
                         Modifier
-                            .width((screenW - 44).dp)
-                            .shadow(12.dp, RoundedCornerShape(20.dp))
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(MaterialTheme.colorScheme.surface)
-                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant,
-                                    RoundedCornerShape(20.dp))
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                            .width((screenW - 44).dp),
                     ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        // 卡片外观（阴影/底色/描边）独立成层：拖裁剪滑条时整层淡出，
+                        // 边框阴影一并消失；alpha 不能直接给内容容器，否则滑条一起被
+                        // 淡掉，故分层。
+                        Box(
+                            Modifier
+                                .matchParentSize()
+                                .alpha(if (trimScrubbing) 0f else 1f)
+                                .shadow(12.dp, RoundedCornerShape(20.dp))
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(MaterialTheme.colorScheme.surface)
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant,
+                                        RoundedCornerShape(20.dp)),
+                        )
+                        Column(
+                            Modifier
+                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
                             // 片段 — 输出设置首项
                             Row(
-                                Modifier.fillMaxWidth(),
+                                Modifier
+                                    .fillMaxWidth()
+                                    .alpha(if (trimScrubbing) 0f else 1f),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
@@ -1490,108 +1499,163 @@ fun SwapScreen(
                                 activeTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
                                 inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.69f),
                             )
-                            RangeSlider(
-                                value = trimStartMs..trimEndMs,
-                                onValueChange = { r ->
-                                    // Which handle moved: RangeSlider reports the whole range, so the
-                                    // edge has to be inferred by comparing against what it was. The
-                                    // previews then follow the handle under the finger rather than
-                                    // always showing the start frame.
-                                    val edge = if (r.start != trimStartMs) TrimEdge.Start else TrimEdge.End
-                                    // Keep at least a third of a second, so the encoder always gets a frame.
-                                    onTrimChange(r.start, maxOf(r.endInclusive, r.start + 333f), edge)
-                                },
-                                valueRange = 0f..durationMs.toFloat(),
-                                enabled = idle,
-                                colors = trimSliderColors,
-                            )
-                            // The REAL rate, not a hardcoded 30. The estimate was wrong on every
-                            // clip that was not 30 fps, and it is the number the ETA is read against.
-                            val effFps = if (opts.outputFps in 1..inputFps) opts.outputFps else inputFps
-                            val estFrames = ((trimEndMs - trimStartMs) / 1000f * effFps).roundToInt()
-                            Text(
-                                stringResource(R.string.swap_clip_summary,
-                                               estFrames, fmt(durationMs.toFloat()), effFps),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-
-                            // Frame rate and output size are the same kind of decision.
-                            Spacer(Modifier.height(6.dp))
-                            // ⚠ The SOURCE option is named by its own number, not by the word "same".
-                            // Sitting in a row that reads 480p / 720p / 1080p, "Same as source" was the
-                            // one chip that did not say what it would produce -- and the clip's size is
-                            // already on this screen, so there was nothing to look up. A clip whose
-                            // short edge is not a familiar number ("606p") still reads honestly, and
-                            // the hint underneath carries the full WxH either way.
-                            val srcShort = minOf(targetW, targetH)
-                            // "Same (960p)": the word says what the choice MEANS and the number says
-                            // what it produces. The number alone made the source chip look like one
-                            // more fixed size rather than the leave-it-alone option, which is what it
-                            // is and what most runs want.
-                            val srcName = if (srcShort > 0)
-                                              stringResource(R.string.swap_size_source_at, srcShort)
-                                          else stringResource(R.string.swap_size_source)
-                            // OUTPUT SIZE, on the SHORT edge so the aspect ratio never changes and
-                            // "480p" means what it means everywhere else. Only sizes BELOW the clip's
-                            // own are offered, for the same reason the frame rate only offers lower
-                            // rates: enlarging costs bitrate and adds nothing, because the swapper runs
-                            // at 256 whatever the frame is.
-                            //
-                            // ⚠ It is applied at DECODE, so it makes the RUN faster too -- detector prep
-                            // and paste-back scale with frame area, and 4K is ~9x the area of 1080p.
-                            // What it cannot do is make a face sharper; that is pixel boost and the
-                            // enhancer, and this control must not be mistaken for them.
-                            val shortEdge = srcShort
-                            val sizes = listOf(480, 720, 1080).filter { it < shortEdge }
-                                            .map { it to (it.toString() + "p") } +
-                                        listOf(0 to srcName)
-                            if (sizes.size > 1) {
-                                OptionSteps(
-                                    stringResource(R.string.swap_output_size),
-                                    sizes,
-                                    if (opts.outputMaxShortEdge in 1 until shortEdge)
-                                        opts.outputMaxShortEdge else 0,
-                                    { onOptsChange(opts.copy(outputMaxShortEdge = it)) },
-                                    hint = if (opts.outputMaxShortEdge in 1 until shortEdge)
-                                               stringResource(R.string.swap_size_hint_smaller)
-                                           else if (targetW > 0 && targetH > 0)
-                                               stringResource(R.string.swap_size_hint_source_dims,
-                                                              targetW, targetH)
-                                           else stringResource(R.string.swap_size_hint_source),
+                            // 自绘线用的颜色在 composable 里取好：Canvas 的 DrawScope
+                            // lambda 不是 composable 上下文，碰不了 colorScheme。
+                            val scrubActive = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f)
+                            val scrubInactive =
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.69f)
+                            Box {
+                                RangeSlider(
+                                    value = trimStartMs..trimEndMs,
+                                    onValueChange = { r ->
+                                        trimScrubbing = true
+                                        // Which handle moved: RangeSlider reports the whole range, so the
+                                        // edge has to be inferred by comparing against what it was. The
+                                        // previews then follow the handle under the finger rather than
+                                        // always showing the start frame.
+                                        val edge = if (r.start != trimStartMs) TrimEdge.Start else TrimEdge.End
+                                        // Keep at least a third of a second, so the encoder always gets a frame.
+                                        onTrimChange(r.start, maxOf(r.endInclusive, r.start + 333f), edge)
+                                    },
+                                    valueRange = 0f..durationMs.toFloat(),
                                     enabled = idle,
+                                    onValueChangeFinished = { trimScrubbing = false },
+                                    colors = trimSliderColors,
+                                    // 一个源接两个拇指：任一拇指被按住（或点轨道带动
+                                    // 最近拇指）都算进入聚焦态。
+                                    startInteractionSource = trimSliderIx,
+                                    endInteractionSource = trimSliderIx,
+                                    // 聚焦态下真实滑条隐去（拇指竖杠一并消失），由下面的
+                                    // Canvas 接手外观；手势仍走这个控件本身。
+                                    modifier = Modifier.alpha(if (trimScrubbing) 0f else 1f),
                                 )
+                                if (trimScrubbing) {
+                                    Canvas(
+                                        Modifier
+                                            .matchParentSize()
+                                            .alpha(0.5f),
+                                    ) {
+                                        val inset = 10.dp.toPx()
+                                        val trackW = (size.width - inset * 2f)
+                                            .coerceAtLeast(1f)
+                                        val h = 3.dp.toPx()
+                                        val y = (size.height - h) / 2f
+                                        val f0 = if (durationMs > 0)
+                                                     trimStartMs / durationMs.toFloat()
+                                                 else 0f
+                                        val f1 = if (durationMs > 0)
+                                                     trimEndMs / durationMs.toFloat()
+                                                 else 1f
+                                        drawRoundRect(
+                                            color = scrubInactive,
+                                            topLeft = Offset(inset, y),
+                                            size = Size(trackW, h),
+                                            cornerRadius = CornerRadius(h / 2f, h / 2f),
+                                        )
+                                        drawRoundRect(
+                                            color = scrubActive,
+                                            topLeft = Offset(inset + trackW * f0, y),
+                                            size = Size(
+                                                (trackW * (f1 - f0)).coerceAtLeast(h), h,
+                                            ),
+                                            cornerRadius = CornerRadius(h / 2f, h / 2f),
+                                        )
+                                    }
+                                }
                             }
-
-                            // Frame rate. Only rates BELOW the input's are offered: a higher one would
-                            // duplicate frames, and each duplicate costs a full swap to produce nothing
-                            // new. Dropping frames is the only direction that saves anything.
-                            //
-                            // ⚠ The low stops are the point, and 24/30/60 alone were not enough to be
-                            // useful. On a 30 fps clip the deepest cut available was 24 -- a 20% saving
-                            // against the CPU backend, which is an order of magnitude slower than the
-                            // NPU -- and on a 24 fps clip nothing qualified, so the control hid itself
-                            // and offered no reduction at all. 5/10/15 are what make it worth having:
-                            // 30 -> 10 is a third of the frames and close to a third of the time,
-                            // because VideoSwapper decimates BEFORE the swap rather than after it.
-                            //
-                            // Ascending, with "same as source" last: the slider then runs from cheapest
-                            // on the left to full quality on the right, which is the direction the
-                            // trade-off reads in.
-                            val rates = listOf(5, 10, 15, 24, 30, 60).filter { it < inputFps }
-                                            .map { it to "$it" } +
-                                        listOf(0 to stringResource(R.string.swap_rate_same, inputFps))
-                            if (rates.size > 1) {
-                                OptionSteps(
-                                    stringResource(R.string.swap_frame_rate),
-                                    rates,
-                                    if (opts.outputFps in 1..inputFps) opts.outputFps else 0,
-                                    { onOptsChange(opts.copy(outputFps = it)) },
-                                    hint = if (opts.outputFps == 0 || opts.outputFps >= inputFps)
-                                               stringResource(R.string.swap_rate_hint_every)
-                                           else stringResource(R.string.swap_rate_hint_drop),
-                                    enabled = idle,
+                            // 滑条之外的余下部分同层淡出。
+                            Column(
+                                Modifier.alpha(if (trimScrubbing) 0f else 1f),
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                // The REAL rate, not a hardcoded 30. The estimate was wrong on every
+                                // clip that was not 30 fps, and it is the number the ETA is read against.
+                                val effFps = if (opts.outputFps in 1..inputFps) opts.outputFps else inputFps
+                                val estFrames = ((trimEndMs - trimStartMs) / 1000f * effFps).roundToInt()
+                                Text(
+                                    stringResource(R.string.swap_clip_summary,
+                                                   estFrames, fmt(durationMs.toFloat()), effFps),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
+
+                                // Frame rate and output size are the same kind of decision.
+                                Spacer(Modifier.height(6.dp))
+                                // ⚠ The SOURCE option is named by its own number, not by the word "same".
+                                // Sitting in a row that reads 480p / 720p / 1080p, "Same as source" was the
+                                // one chip that did not say what it would produce -- and the clip's size is
+                                // already on this screen, so there was nothing to look up. A clip whose
+                                // short edge is not a familiar number ("606p") still reads honestly, and
+                                // the hint underneath carries the full WxH either way.
+                                val srcShort = minOf(targetW, targetH)
+                                // "Same (960p)": the word says what the choice MEANS and the number says
+                                // what it produces. The number alone made the source chip look like one
+                                // more fixed size rather than the leave-it-alone option, which is what it
+                                // is and what most runs want.
+                                val srcName = if (srcShort > 0)
+                                                  stringResource(R.string.swap_size_source_at, srcShort)
+                                              else stringResource(R.string.swap_size_source)
+                                // OUTPUT SIZE, on the SHORT edge so the aspect ratio never changes and
+                                // "480p" means what it means everywhere else. Only sizes BELOW the clip's
+                                // own are offered, for the same reason the frame rate only offers lower
+                                // rates: enlarging costs bitrate and adds nothing, because the swapper runs
+                                // at 256 whatever the frame is.
+                                //
+                                // ⚠ It is applied at DECODE, so it makes the RUN faster too -- detector prep
+                                // and paste-back scale with frame area, and 4K is ~9x the area of 1080p.
+                                // What it cannot do is make a face sharper; that is pixel boost and the
+                                // enhancer, and this control must not be mistaken for them.
+                                val shortEdge = srcShort
+                                val sizes = listOf(480, 720, 1080).filter { it < shortEdge }
+                                                .map { it to (it.toString() + "p") } +
+                                            listOf(0 to srcName)
+                                if (sizes.size > 1) {
+                                    OptionSteps(
+                                        stringResource(R.string.swap_output_size),
+                                        sizes,
+                                        if (opts.outputMaxShortEdge in 1 until shortEdge)
+                                            opts.outputMaxShortEdge else 0,
+                                        { onOptsChange(opts.copy(outputMaxShortEdge = it)) },
+                                        hint = if (opts.outputMaxShortEdge in 1 until shortEdge)
+                                                   stringResource(R.string.swap_size_hint_smaller)
+                                               else if (targetW > 0 && targetH > 0)
+                                                   stringResource(R.string.swap_size_hint_source_dims,
+                                                                  targetW, targetH)
+                                               else stringResource(R.string.swap_size_hint_source),
+                                        enabled = idle,
+                                    )
+                                }
+
+                                // Frame rate. Only rates BELOW the input's are offered: a higher one would
+                                // duplicate frames, and each duplicate costs a full swap to produce nothing
+                                // new. Dropping frames is the only direction that saves anything.
+                                //
+                                // ⚠ The low stops are the point, and 24/30/60 alone were not enough to be
+                                // useful. On a 30 fps clip the deepest cut available was 24 -- a 20% saving
+                                // against the CPU backend, which is an order of magnitude slower than the
+                                // NPU -- and on a 24 fps clip nothing qualified, so the control hid itself
+                                // and offered no reduction at all. 5/10/15 are what make it worth having:
+                                // 30 -> 10 is a third of the frames and close to a third of the time,
+                                // because VideoSwapper decimates BEFORE the swap rather than after it.
+                                //
+                                // Ascending, with "same as source" last: the slider then runs from cheapest
+                                // on the left to full quality on the right, which is the direction the
+                                // trade-off reads in.
+                                val rates = listOf(5, 10, 15, 24, 30, 60).filter { it < inputFps }
+                                                .map { it to "$it" } +
+                                            listOf(0 to stringResource(R.string.swap_rate_same, inputFps))
+                                if (rates.size > 1) {
+                                    OptionSteps(
+                                        stringResource(R.string.swap_frame_rate),
+                                        rates,
+                                        if (opts.outputFps in 1..inputFps) opts.outputFps else 0,
+                                        { onOptsChange(opts.copy(outputFps = it)) },
+                                        hint = if (opts.outputFps == 0 || opts.outputFps >= inputFps)
+                                                   stringResource(R.string.swap_rate_hint_every)
+                                               else stringResource(R.string.swap_rate_hint_drop),
+                                        enabled = idle,
+                                    )
+                                }
                             }
                         }
                     }
