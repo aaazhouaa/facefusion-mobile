@@ -1096,7 +1096,10 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) capture(pendingCaptureIsVideo, pendingCaptureForSource,
                              pendingCaptureLiveForSource)
-        else status = getString(R.string.status_camera_denied)
+        // A toast, not the status line: the denial happens while the user is looking at
+        // the tile they tapped (or at the live feed), the status line renders below the
+        // Swap button -- out of sight and shoving the layout around when it IS seen.
+        else toast(getString(R.string.status_camera_denied))
     }
 
     // OpenDocument rather than GetContent: GetContent takes ONE mime filter, and the
@@ -3227,7 +3230,7 @@ class MainActivity : ComponentActivity() {
     private val askMic = registerForActivityResult(
         ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) toggleVoiceRecording()
-        else status = getString(R.string.status_mic_denied)
+        else toast(getString(R.string.status_mic_denied))
     }
 
     private fun clearVoice() {
@@ -3792,7 +3795,9 @@ class MainActivity : ComponentActivity() {
     private val askLiveMic = registerForActivityResult(
         ActivityResultContracts.RequestPermission()) { granted ->
         liveMicrophone = granted
-        if (!granted) status = getString(R.string.status_mic_denied)
+        // Toast, and deliberately not liveNote: the note renders inside the Live screen
+        // body and a stale permission sentence would sit there for the whole session.
+        if (!granted) toast(getString(R.string.status_mic_denied))
     }
 
     private fun changeLiveMicrophone(enabled: Boolean) {
@@ -3810,7 +3815,7 @@ class MainActivity : ComponentActivity() {
             if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) !=
                 android.content.pm.PackageManager.PERMISSION_GRANTED) {
                 liveMicrophone = false
-                status = getString(R.string.status_mic_denied)
+                toast(getString(R.string.status_mic_denied))
                 return
             }
             if (recordingVoice) {
