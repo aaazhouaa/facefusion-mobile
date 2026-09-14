@@ -151,8 +151,10 @@ fun LiveScreen(
             trailing = {
                 if (!running) {
                     IconButton(onCaptureSource, Modifier.size(22.dp)) {
-                        Icon(painterResource(R.drawable.ic_photo_camera),
-                             stringResource(R.string.swap_capture_source), Modifier.size(16.dp))
+                        HintIcon(stringResource(R.string.swap_capture_source)) {
+                            Icon(painterResource(R.drawable.ic_photo_camera),
+                                 stringResource(R.string.swap_capture_source), Modifier.size(16.dp))
+                        }
                     }
                 }
             },
@@ -625,12 +627,14 @@ fun LiveScreen(
                         onClick = { showAssignHelp = true },
                         modifier = Modifier.size(32.dp),
                     ) {
-                        Icon(
-                            Icons.Filled.Info,
-                            contentDescription = stringResource(R.string.live_assign_help),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(18.dp),
-                        )
+                        HintIcon(stringResource(R.string.live_assign_help)) {
+                            Icon(
+                                Icons.Filled.Info,
+                                contentDescription = stringResource(R.string.live_assign_help),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
                     }
                     // Clear lives with the switch: turning the mode off means default behaviour
                     // (each face takes the selected source) for the whole session, so the

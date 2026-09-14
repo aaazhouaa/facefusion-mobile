@@ -272,16 +272,20 @@ fun LivePlayerOverlay(
                         modifier = Modifier.weight(1f).padding(start = 8.dp),
                     )
                     IconButton(onClick = { forceLandscape = !forceLandscape }) {
-                        Icon(
-                            IconRotate,
-                            stringResource(R.string.player_landscape),
-                            tint = if (forceLandscape) MaterialTheme.colorScheme.primary
-                                   else Color.White,
-                        )
+                        HintIcon(stringResource(R.string.player_landscape)) {
+                            Icon(
+                                IconRotate,
+                                stringResource(R.string.player_landscape),
+                                tint = if (forceLandscape) MaterialTheme.colorScheme.primary
+                                       else Color.White,
+                            )
+                        }
                     }
                     IconButton(onClick = onClose) {
-                        Icon(Icons.Default.Close, stringResource(R.string.player_close),
-                             tint = Color.White)
+                        HintIcon(stringResource(R.string.player_close)) {
+                            Icon(Icons.Default.Close, stringResource(R.string.player_close),
+                                 tint = Color.White)
+                        }
                     }
                 }
             }
@@ -304,12 +308,15 @@ fun LivePlayerOverlay(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = onPlayPause) {
-                            Icon(
-                                if (playing) IconPause else Icons.Default.PlayArrow,
-                                stringResource(if (playing) R.string.out_pause
-                                               else R.string.out_play),
-                                tint = Color.White,
-                            )
+                            HintIcon(stringResource(if (playing) R.string.out_pause
+                                                    else R.string.out_play)) {
+                                Icon(
+                                    if (playing) IconPause else Icons.Default.PlayArrow,
+                                    stringResource(if (playing) R.string.out_pause
+                                                   else R.string.out_play),
+                                    tint = Color.White,
+                                )
+                            }
                         }
                         Text(
                             clock(scrubMs ?: positionMs),

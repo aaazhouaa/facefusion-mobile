@@ -142,19 +142,23 @@ fun AppScaffold(
                     Box(
                         Modifier
                             .size(28.dp)
-                            .clip(CircleShape)
-                            .clickable { onToggleTheme(!isDark) },
+                            .clip(CircleShape),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(
-                            painterResource(
-                                if (isDark) R.drawable.ic_theme_sun
-                                else R.drawable.ic_theme_moon
-                            ),
-                            contentDescription = stringResource(R.string.topbar_toggle_theme),
-                            modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.onBackground.copy(alpha = brandAlpha),
-                        )
+                        HintIcon(stringResource(R.string.topbar_toggle_theme)) {
+                            Icon(
+                                painterResource(
+                                    if (isDark) R.drawable.ic_theme_sun
+                                    else R.drawable.ic_theme_moon
+                                ),
+                                contentDescription = stringResource(R.string.topbar_toggle_theme),
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .clip(CircleShape)
+                                    .clickable { onToggleTheme(!isDark) },
+                                tint = MaterialTheme.colorScheme.onBackground.copy(alpha = brandAlpha),
+                            )
+                        }
                     }
                 }
             }

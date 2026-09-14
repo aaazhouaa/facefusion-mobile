@@ -561,17 +561,19 @@ fun SwapScreen(
                         // 48 dp box would no longer fit two across a phone, which is the
                         // layout constraint this row is already built around.
                         if (installed && onSettings != null) {
-                            Icon(
-                                Icons.Default.Settings,
-                                stringResource(R.string.swap_proc_settings, name),
-                                Modifier
-                                    .size(18.dp)
-                                    .clip(CircleShape)
-                                    .clickable(enabled = idle) { onSettings() }
-                                    .alpha(if (idle) 1f else 0.31f),
-                                tint = if (active) MaterialTheme.colorScheme.onBackground
-                                       else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            HintIcon(stringResource(R.string.swap_proc_settings, name)) {
+                                Icon(
+                                    Icons.Default.Settings,
+                                    stringResource(R.string.swap_proc_settings, name),
+                                    Modifier
+                                        .size(18.dp)
+                                        .clip(CircleShape)
+                                        .clickable(enabled = idle) { onSettings() }
+                                        .alpha(if (idle) 1f else 0.31f),
+                                    tint = if (active) MaterialTheme.colorScheme.onBackground
+                                           else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
                 }
@@ -675,34 +677,37 @@ fun SwapScreen(
                         // screen; the drawn pause bars share it.
                         val voiceTint = MaterialTheme.colorScheme.onSurfaceVariant
                             .copy(alpha = if (idle) 1f else 0.31f)
-                        if (voicePlaying) {
-                            // Two bars, drawn rather than an icon: the icons artifact this app
-                            // carries (material3's transitive icons-core) has PlayArrow but no
-                            // Pause, and extended-icons is a heavy addition for one glyph.
-                            val pauseTint = voiceTint
-                            Canvas(Modifier.size(16.dp)) {
-                                val bar = 4.dp.toPx()
-                                val gap = 3.dp.toPx()
-                                val top = 0.dp.toPx()
-                                val bottom = size.height
-                                drawRoundRect(
-                                    color = pauseTint,
-                                    topLeft = Offset(0f, top),
-                                    size = Size(bar, bottom - top),
-                                    cornerRadius = CornerRadius(1.dp.toPx()),
-                                )
-                                drawRoundRect(
-                                    color = pauseTint,
-                                    topLeft = Offset(bar + gap, top),
-                                    size = Size(bar, bottom - top),
-                                    cornerRadius = CornerRadius(1.dp.toPx()),
-                                )
+                        HintIcon(stringResource(if (voicePlaying) R.string.out_pause
+                                                else R.string.swap_voice_play)) {
+                            if (voicePlaying) {
+                                // Two bars, drawn rather than an icon: the icons artifact this app
+                                // carries (material3's transitive icons-core) has PlayArrow but no
+                                // Pause, and extended-icons is a heavy addition for one glyph.
+                                val pauseTint = voiceTint
+                                Canvas(Modifier.size(16.dp)) {
+                                    val bar = 4.dp.toPx()
+                                    val gap = 3.dp.toPx()
+                                    val top = 0.dp.toPx()
+                                    val bottom = size.height
+                                    drawRoundRect(
+                                        color = pauseTint,
+                                        topLeft = Offset(0f, top),
+                                        size = Size(bar, bottom - top),
+                                        cornerRadius = CornerRadius(1.dp.toPx()),
+                                    )
+                                    drawRoundRect(
+                                        color = pauseTint,
+                                        topLeft = Offset(bar + gap, top),
+                                        size = Size(bar, bottom - top),
+                                        cornerRadius = CornerRadius(1.dp.toPx()),
+                                    )
+                                }
+                            } else {
+                                Icon(Icons.Default.PlayArrow,
+                                     stringResource(R.string.swap_voice_play),
+                                     Modifier.size(20.dp),
+                                     tint = voiceTint)
                             }
-                        } else {
-                            Icon(Icons.Default.PlayArrow,
-                                 stringResource(R.string.swap_voice_play),
-                                 Modifier.size(20.dp),
-                                 tint = voiceTint)
                         }
                     }
                     Slider(
@@ -775,10 +780,12 @@ fun SwapScreen(
                         // tile jump -- dimmed to 31% (a 69% opacity drop) and deaf to taps
                         // until the run ends.
                         IconButton(onCaptureSource, Modifier.size(28.dp), enabled = idle) {
-                            Icon(painterResource(R.drawable.ic_photo_camera),
-                                 stringResource(R.string.swap_capture_source), Modifier.size(16.dp),
-                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                     .copy(alpha = if (idle) 1f else 0.31f))
+                            HintIcon(stringResource(R.string.swap_capture_source)) {
+                                Icon(painterResource(R.drawable.ic_photo_camera),
+                                     stringResource(R.string.swap_capture_source), Modifier.size(16.dp),
+                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                         .copy(alpha = if (idle) 1f else 0.31f))
+                            }
                         }
                     },
                     bottomActions = {
@@ -788,11 +795,13 @@ fun SwapScreen(
                         // Same as the camera above: visible through a run, 31%, inert.
                         if (hasSource) {
                             IconButton(onClearSource, Modifier.size(28.dp), enabled = idle) {
-                                Icon(Icons.Default.Delete,
-                                     stringResource(R.string.swap_remove_source),
-                                     Modifier.size(16.dp),
-                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                         .copy(alpha = if (idle) 1f else 0.31f))
+                                HintIcon(stringResource(R.string.swap_remove_source)) {
+                                    Icon(Icons.Default.Delete,
+                                         stringResource(R.string.swap_remove_source),
+                                         Modifier.size(16.dp),
+                                         tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                             .copy(alpha = if (idle) 1f else 0.31f))
+                                }
                             }
                         }
                     },
@@ -1019,10 +1028,12 @@ fun SwapScreen(
                             // still and a clip take different routes through the system camera, and
                             // one button that then asks which is a tap for a question the icons answer.
                             IconButton(onCapturePhoto, enabled = idle, modifier = Modifier.size(28.dp)) {
-                                Icon(painterResource(R.drawable.ic_photo_camera),
-                                     stringResource(R.string.swap_capture_photo), Modifier.size(16.dp),
-                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                         .copy(alpha = if (idle) 1f else 0.31f))
+                                HintIcon(stringResource(R.string.swap_capture_photo)) {
+                                    Icon(painterResource(R.drawable.ic_photo_camera),
+                                         stringResource(R.string.swap_capture_photo), Modifier.size(16.dp),
+                                         tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                             .copy(alpha = if (idle) 1f else 0.31f))
+                                }
                             }
                         }
                     },
@@ -1030,10 +1041,12 @@ fun SwapScreen(
                         // VIDEO CAMERA, back on its original seat in the bottom-right corner.
                         if (!hasTarget) {
                             IconButton(onCaptureVideo, enabled = idle, modifier = Modifier.size(28.dp)) {
-                                Icon(painterResource(R.drawable.ic_videocam),
-                                     stringResource(R.string.swap_capture_video), Modifier.size(16.dp),
-                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                         .copy(alpha = if (idle) 1f else 0.31f))
+                                HintIcon(stringResource(R.string.swap_capture_video)) {
+                                    Icon(painterResource(R.drawable.ic_videocam),
+                                         stringResource(R.string.swap_capture_video), Modifier.size(16.dp),
+                                         tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                             .copy(alpha = if (idle) 1f else 0.31f))
+                                }
                             }
                         }
                         // FACES, the upstream pane's own switch, moved into the tile's
@@ -1042,19 +1055,23 @@ fun SwapScreen(
                         if (hasTarget) {
                             IconButton(onToggleFaceBoxes, enabled = idle,
                                        modifier = Modifier.size(28.dp)) {
-                                Icon(Icons.Default.Face,
-                                     stringResource(R.string.swap_show_faces),
-                                     Modifier.size(16.dp),
-                                     tint = (if (showFaceBoxes) FfRed
-                                             else MaterialTheme.colorScheme.onSurfaceVariant)
-                                         .copy(alpha = if (idle) 1f else 0.31f))
+                                HintIcon(stringResource(R.string.swap_show_faces)) {
+                                    Icon(Icons.Default.Face,
+                                         stringResource(R.string.swap_show_faces),
+                                         Modifier.size(16.dp),
+                                         tint = (if (showFaceBoxes) FfRed
+                                                 else MaterialTheme.colorScheme.onSurfaceVariant)
+                                             .copy(alpha = if (idle) 1f else 0.31f))
+                                }
                             }
                             // TRASH, on the same bottom edge as the other tiles' delete.
                             IconButton(onClearTarget, enabled = idle, modifier = Modifier.size(28.dp)) {
-                                Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_target),
-                                     Modifier.size(16.dp),
-                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                         .copy(alpha = if (idle) 1f else 0.31f))
+                                HintIcon(stringResource(R.string.swap_remove_target)) {
+                                    Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_target),
+                                         Modifier.size(16.dp),
+                                         tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                             .copy(alpha = if (idle) 1f else 0.31f))
+                                }
                             }
                         }
                     },
@@ -1087,22 +1104,27 @@ fun SwapScreen(
                         // to go find first.
                         if (idle) {
                             IconButton(onToggleRecordVoice, modifier = Modifier.size(28.dp)) {
-                                Icon(painterResource(if (recordingVoice) R.drawable.ic_stop
-                                                     else R.drawable.ic_mic),
-                                     stringResource(if (recordingVoice) R.string.swap_voice_stop
-                                                    else R.string.swap_voice_record),
-                                     Modifier.size(16.dp),
-                                     tint = (if (recordingVoice) MaterialTheme.colorScheme.error
-                                             else MaterialTheme.colorScheme.onSurfaceVariant)
-                                         .copy(alpha = if (idle) 1f else 0.31f))
+                                HintIcon(stringResource(if (recordingVoice) R.string.swap_voice_stop
+                                                       else R.string.swap_voice_record)) {
+                                    Icon(painterResource(if (recordingVoice) R.drawable.ic_stop
+                                                         else R.drawable.ic_mic),
+                                         stringResource(if (recordingVoice) R.string.swap_voice_stop
+                                                        else R.string.swap_voice_record),
+                                         Modifier.size(16.dp),
+                                         tint = (if (recordingVoice) MaterialTheme.colorScheme.error
+                                                 else MaterialTheme.colorScheme.onSurfaceVariant)
+                                             .copy(alpha = if (idle) 1f else 0.31f))
+                                }
                             }
                         }
                     },
                     bottomActions = {
                         if (hasVoice && idle) {
                             IconButton(onClearVoice, modifier = Modifier.size(28.dp).alpha(if (idle) 1f else 0.31f)) {
-                                Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_voice),
-                                     Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                HintIcon(stringResource(R.string.swap_remove_voice)) {
+                                    Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_voice),
+                                         Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                             }
                         }
                     },
@@ -1214,14 +1236,16 @@ fun SwapScreen(
                                    // icon; pull it back toward the label so the gap reads
                                    // like the text's own padding.
                                    modifier = Modifier.offset(x = (-12).dp)) {
-                            Icon(
-                                IconDownload,
-                                stringResource(R.string.out_save_frame),
-                                // 同一行触发头的净显示规格：22 dp；与其它图标同色。
-                                Modifier.size(22.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    .copy(alpha = if (idle) 1f else 0.31f),
-                            )
+                            HintIcon(stringResource(R.string.out_save_frame)) {
+                                Icon(
+                                    IconDownload,
+                                    stringResource(R.string.out_save_frame),
+                                    // 同一行触发头的净显示规格：22 dp；与其它图标同色。
+                                    Modifier.size(22.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        .copy(alpha = if (idle) 1f else 0.31f),
+                                )
+                            }
                         }
                     }
                     if (preview.busy) {
@@ -1240,49 +1264,55 @@ fun SwapScreen(
                     // 批量添加之前；内容以居中浮层挂在窗格锚点上（见下方第二个 Popup）。
                     // 仅视频目标时出现；与批量菜单互斥，开一个关另一个。
                     if (durationMs > 0) {
+                        HintIcon(stringResource(R.string.swap_output_settings)) {
+                            Icon(
+                                Icons.Default.Settings,
+                                stringResource(R.string.swap_output_settings),
+                                Modifier
+                                    .size(32.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        trimExpanded = !trimExpanded
+                                        if (trimExpanded) batchMenuExpanded = false
+                                    }
+                                    .padding(6.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    // 批量添加入口：图标而非文本，与左侧齿轮同一触发头样式；
+                    // 语义名（“批量添加”）给无障碍与长按提示。
+                    HintIcon(stringResource(R.string.swap_batch_menu)) {
                         Icon(
-                            Icons.Default.Settings,
-                            stringResource(R.string.swap_output_settings),
+                            painterResource(R.drawable.ic_playlist_add),
+                            stringResource(R.string.swap_batch_menu),
                             Modifier
-                                .size(32.dp)
+                                .size(34.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .clickable {
-                                    trimExpanded = !trimExpanded
-                                    if (trimExpanded) batchMenuExpanded = false
+                                    batchMenuExpanded = !batchMenuExpanded
+                                    if (batchMenuExpanded) trimExpanded = false
                                 }
                                 .padding(6.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    // 批量添加入口：图标而非文本，与左侧齿轮同一触发头样式；
-                    // 语义名（“批量添加”）给无障碍与长按提示。
-                    Icon(
-                        painterResource(R.drawable.ic_playlist_add),
-                        stringResource(R.string.swap_batch_menu),
-                        Modifier
-                            .size(34.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable {
-                                batchMenuExpanded = !batchMenuExpanded
-                                if (batchMenuExpanded) trimExpanded = false
-                            }
-                            .padding(6.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                     // 自动保存开关：Save 图标，启用时主题色（深），未启用时浅灰。
                     // 与两个触发头同规格：32dp 盒、6dp 内边距，净显示 20dp。
-                    Icon(
-                        painterResource(R.drawable.ic_save),
-                        stringResource(R.string.batch_autosave),
-                        Modifier
-                            .size(32.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable(enabled = idle) { onBatchAutoSave(!batchAutoSave) }
-                            .padding(6.dp),
-                        tint = if (batchAutoSave) MaterialTheme.colorScheme.primary
-                               else MaterialTheme.colorScheme.onSurfaceVariant
-                                   .copy(alpha = if (idle) 0.38f else 0.31f),
-                    )
+                    HintIcon(stringResource(R.string.batch_autosave)) {
+                        Icon(
+                            painterResource(R.drawable.ic_save),
+                            stringResource(R.string.batch_autosave),
+                            Modifier
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(enabled = idle) { onBatchAutoSave(!batchAutoSave) }
+                                .padding(6.dp),
+                            tint = if (batchAutoSave) MaterialTheme.colorScheme.primary
+                                   else MaterialTheme.colorScheme.onSurfaceVariant
+                                       .copy(alpha = if (idle) 0.38f else 0.31f),
+                        )
+                    }
                     // 清空全部。32dp 盒、6dp 内边距，净显示 20dp，与触发头同规格；
                     // 队列空时不透明度降到 31%，读作"没有可清的东西"，但仍占着位置。
                     // 跑批中同样 31%：图标已被禁用，全亮会读作可点。
@@ -1291,11 +1321,13 @@ fun SwapScreen(
                         enabled = idle && batch.isNotEmpty(),
                         modifier = Modifier.size(32.dp),
                     ) {
-                        Icon(Icons.Default.Delete,
-                             stringResource(R.string.batch_clear_desc),
-                             Modifier.size(20.dp),
-                             tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                 .copy(alpha = if (idle && batch.isNotEmpty()) 1f else 0.31f))
+                        HintIcon(stringResource(R.string.batch_clear_desc)) {
+                            Icon(Icons.Default.Delete,
+                                 stringResource(R.string.batch_clear_desc),
+                                 Modifier.size(20.dp),
+                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                     .copy(alpha = if (idle && batch.isNotEmpty()) 1f else 0.31f))
+                        }
                     }
                 },
             )
@@ -1889,12 +1921,14 @@ fun SwapScreen(
                                else if (idle || run.canCancel)
                                    MaterialTheme.colorScheme.onSurfaceVariant
                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.31f)
-                    Icon(
-                        IconDownload,
-                        stringResource(R.string.swap_save_to_gallery),
-                        Modifier.size(18.dp),
-                        tint = tint,
-                    )
+                    HintIcon(stringResource(R.string.swap_save_to_gallery)) {
+                        Icon(
+                            IconDownload,
+                            stringResource(R.string.swap_save_to_gallery),
+                            Modifier.size(18.dp),
+                            tint = tint,
+                        )
+                    }
                 }
             }
                 },
@@ -2066,10 +2100,12 @@ fun SwapScreen(
                                        ),
                                        border = BorderStroke(1.dp,
                                                              MaterialTheme.colorScheme.outlineVariant)) {
-                            Icon(Icons.Default.Delete, stringResource(R.string.out_delete),
-                                 Modifier.size(18.dp),
-                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                     .copy(alpha = if (idle) 1f else 0.31f))
+                            HintIcon(stringResource(R.string.out_delete)) {
+                                Icon(Icons.Default.Delete, stringResource(R.string.out_delete),
+                                     Modifier.size(18.dp),
+                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                         .copy(alpha = if (idle) 1f else 0.31f))
+                            }
                         }
                     }
                 }

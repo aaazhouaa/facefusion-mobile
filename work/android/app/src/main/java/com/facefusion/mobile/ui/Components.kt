@@ -49,6 +49,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.input.pointer.pointerInput
 import com.facefusion.mobile.R
 import kotlinx.coroutines.delay
 import java.io.File
@@ -123,6 +125,66 @@ val IconDownload: ImageVector = ImageVector.Builder(
         verticalLineToRelative(-2f); horizontalLineTo(5f); close()
     }
 }.build()
+
+/**
+ * An icon that explains itself on long-press: hold and a small tooltip bubble pops up
+ * over the glyph with its [label] (the same string the content description carries);
+ * release and it is gone.
+ *
+ * Wraps any painter/vector icon: the icon composable is passed as [content] so the
+ * caller's size, tint and modifiers are untouched, and only the pointer handling is
+ * added here. The bubble is a plain Box -- not a material3 tooltip, which steals a
+ * minimum 40 dp touch footprint the row's tight trigger heads cannot spare.
+ *
+ * The gesture must not swallow taps: [detectTapGestures] with only onLongPress leaves
+ * onTap unconsumed, so a clickable placed UNDER this (or under the content's own
+ * clickable) keeps working. Long-press alone is detected here; on release the flag
+ * clears and the bubble disappears.
+ */
+@Composable
+fun HintIcon(
+    label: String,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    var showHint by remember { mutableStateOf(false) }
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Box(
+            Modifier
+                .pointerInput(label) {
+                    detectTapGestures(
+                        onLongPress = { showHint = true },
+                        onPress = { tryAwaitRelease(); showHint = false },
+                    )
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            content()
+        }
+        if (showHint) {
+            Popup(
+                alignment = Alignment.TopCenter,
+                offset = IntOffset(0, with(LocalDensity.current) { (-26).dp.roundToPx() }),
+                onDismissRequest = { showHint = false },
+                properties = PopupProperties(focusable = false),
+            ) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant,
+                                RoundedCornerShape(6.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+        }
+    }
+}
 
 /** A small all-caps caption. Used for the pane labels and settings section headers. */
 @Composable
@@ -267,15 +329,18 @@ private fun SectionCardHeader(
         trailing()
         if (collapsible) {
             Spacer(Modifier.width(6.dp))
-            Icon(
-                Icons.Default.KeyboardArrowDown,
-                stringResource(if (expanded) R.string.common_collapse
-                               else R.string.common_expand),
-                Modifier
-                    .size(20.dp)
-                    .rotate(if (expanded) 0f else 180f),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            HintIcon(stringResource(if (expanded) R.string.common_collapse
+                                    else R.string.common_expand)) {
+                Icon(
+                    Icons.Default.KeyboardArrowDown,
+                    stringResource(if (expanded) R.string.common_collapse
+                                   else R.string.common_expand),
+                    Modifier
+                        .size(20.dp)
+                        .rotate(if (expanded) 0f else 180f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -1302,12 +1367,14 @@ private fun AccordionHeader(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
         }
-        Icon(
-            Icons.Default.KeyboardArrowDown,
-            stringResource(if (expanded) R.string.out_collapse else R.string.out_expand),
-            Modifier.rotate(angle),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        HintIcon(stringResource(if (expanded) R.string.out_collapse else R.string.out_expand)) {
+            Icon(
+                Icons.Default.KeyboardArrowDown,
+                stringResource(if (expanded) R.string.out_collapse else R.string.out_expand),
+                Modifier.rotate(angle),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -1408,14 +1475,17 @@ private fun LogBoxHeader(expanded: Boolean, onToggle: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Caption(stringResource(R.string.out_log), Modifier.weight(1f))
-        Icon(
-            Icons.Default.KeyboardArrowDown,
-            stringResource(if (expanded) R.string.common_collapse
-                           else R.string.common_expand),
-            Modifier
-                .size(20.dp)
-                .rotate(if (expanded) 0f else 180f),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        HintIcon(stringResource(if (expanded) R.string.common_collapse
+                                else R.string.common_expand)) {
+            Icon(
+                Icons.Default.KeyboardArrowDown,
+                stringResource(if (expanded) R.string.common_collapse
+                               else R.string.common_expand),
+                Modifier
+                    .size(20.dp)
+                    .rotate(if (expanded) 0f else 180f),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
