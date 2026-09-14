@@ -150,12 +150,9 @@ fun LiveScreen(
             floating = false,
             trailing = {
                 if (!running) {
-                    // 20 dp, the SAME height as the fold chevron beside it: both caption
-                    // rows measure identically, so a collapsed "Source face" and a
-                    // collapsed "Settings" band are the same height.
-                    IconButton(onCaptureSource, Modifier.size(20.dp)) {
+                    IconButton(onCaptureSource, Modifier.size(22.dp)) {
                         Icon(painterResource(R.drawable.ic_photo_camera),
-                             stringResource(R.string.swap_capture_source), Modifier.size(14.dp))
+                             stringResource(R.string.swap_capture_source), Modifier.size(16.dp))
                     }
                 }
             },

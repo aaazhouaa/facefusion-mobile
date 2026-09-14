@@ -697,9 +697,9 @@ fun FaceTile(
                        actions, bottomActions)
         return
     }
-    // ONE element wraps everything: the 72 x 72 dp content square and, right beside it
-    // with only 3 dp of air, the small action icons. The icons live INSIDE the tile's
-    // rounded surface -- they never add to the content square's 72 dp.
+    // ONE element wraps everything: the 72 x 72 dp content square and, flush beside it,
+    // the small action icons. The icons live INSIDE the tile's rounded surface -- they
+    // never add to the content square's 72 dp.
     Box(
         modifier
             .clip(RoundedCornerShape(16.dp))
@@ -832,11 +832,10 @@ fun FaceTile(
                 Box(Modifier.align(Alignment.BottomStart)) { footer?.invoke() }
                 }
             }
-            // Small actions (camera, change, delete…), stacked in a column just 3 dp
-            // to the right of the content square, inside the same tile surface and
+            // Small actions (camera, change, delete…), stacked in a column flush
+            // against the content square, inside the same tile surface and
             // pinned to its bottom edge with the Row above.
             Column(
-                Modifier.padding(start = 3.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 actions()
@@ -850,7 +849,7 @@ fun FaceTile(
  * The voice tile's stretched form as a private helper: ONE surface that stretches to
  * the width the caller hands it (a `weight`), content centred in the whole element,
  * and the small actions in the same bottom-pinned icon column the compact tiles use --
- * 3 dp to the right of the content, inside the same surface.
+ * flush against the content, inside the same surface.
  *
  * `label` is kept for the content description only; it is no longer drawn on the
  * tile. The square/compact tiles do NOT use this form -- they keep the 72 dp content
@@ -876,7 +875,7 @@ private fun FaceTileFilled(
         contentAlignment = Alignment.Center,
     ) {
         // The voice tile lays its icons out exactly like the compact tiles: a
-        // bottom-pinned column 3 dp to the right of the content, inside the same
+        // bottom-pinned column flush against the content, inside the same
         // surface. Only the content itself stretches to the row's leftover width.
         Row(verticalAlignment = Alignment.Bottom) {
             if (bitmap != null) {
@@ -914,11 +913,10 @@ private fun FaceTileFilled(
                     )
                 }
             }
-            // Small actions (record, delete…), stacked in a column just 3 dp to the
-            // right of the content and pinned to the tile's bottom edge -- the same
+            // Small actions (record, delete…), stacked in a column flush against the
+            // content and pinned to the tile's bottom edge -- the same
             // icon column the source and target tiles use.
             Column(
-                Modifier.padding(start = 3.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
                 actions()

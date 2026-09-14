@@ -769,9 +769,9 @@ fun SwapScreen(
                         // The camera stays through a run -- vanishing mid-swap made the
                         // tile jump -- dimmed to 31% (a 69% opacity drop) and deaf to taps
                         // until the run ends.
-                        IconButton(onCaptureSource, Modifier.size(26.dp), enabled = idle) {
+                        IconButton(onCaptureSource, Modifier.size(28.dp), enabled = idle) {
                             Icon(painterResource(R.drawable.ic_photo_camera),
-                                 stringResource(R.string.swap_capture_source), Modifier.size(14.dp),
+                                 stringResource(R.string.swap_capture_source), Modifier.size(16.dp),
                                  tint = MaterialTheme.colorScheme.onSurfaceVariant
                                      .copy(alpha = if (idle) 1f else 0.31f))
                         }
@@ -782,10 +782,10 @@ fun SwapScreen(
                         //
                         // Same as the camera above: visible through a run, 31%, inert.
                         if (hasSource) {
-                            IconButton(onClearSource, Modifier.size(26.dp), enabled = idle) {
+                            IconButton(onClearSource, Modifier.size(28.dp), enabled = idle) {
                                 Icon(Icons.Default.Delete,
                                      stringResource(R.string.swap_remove_source),
-                                     Modifier.size(14.dp),
+                                     Modifier.size(16.dp),
                                      tint = MaterialTheme.colorScheme.onSurfaceVariant
                                          .copy(alpha = if (idle) 1f else 0.31f))
                             }
@@ -1013,9 +1013,9 @@ fun SwapScreen(
                             // is when someone deciding what to swap needs it. Two buttons because a
                             // still and a clip take different routes through the system camera, and
                             // one button that then asks which is a tap for a question the icons answer.
-                            IconButton(onCapturePhoto, enabled = idle, modifier = Modifier.size(26.dp)) {
+                            IconButton(onCapturePhoto, enabled = idle, modifier = Modifier.size(28.dp)) {
                                 Icon(painterResource(R.drawable.ic_photo_camera),
-                                     stringResource(R.string.swap_capture_photo), Modifier.size(14.dp),
+                                     stringResource(R.string.swap_capture_photo), Modifier.size(16.dp),
                                      tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
@@ -1023,9 +1023,9 @@ fun SwapScreen(
                     bottomActions = {
                         // VIDEO CAMERA, back on its original seat in the bottom-right corner.
                         if (!hasTarget) {
-                            IconButton(onCaptureVideo, enabled = idle, modifier = Modifier.size(26.dp)) {
+                            IconButton(onCaptureVideo, enabled = idle, modifier = Modifier.size(28.dp)) {
                                 Icon(painterResource(R.drawable.ic_videocam),
-                                     stringResource(R.string.swap_capture_video), Modifier.size(14.dp),
+                                     stringResource(R.string.swap_capture_video), Modifier.size(16.dp),
                                      tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
@@ -1034,17 +1034,17 @@ fun SwapScreen(
                         // frame, so the switch lives beside them. Icon goes red while on.
                         if (hasTarget) {
                             IconButton(onToggleFaceBoxes, enabled = idle,
-                                       modifier = Modifier.size(26.dp)) {
+                                       modifier = Modifier.size(28.dp)) {
                                 Icon(Icons.Default.Face,
                                      stringResource(R.string.swap_show_faces),
-                                     Modifier.size(14.dp),
+                                     Modifier.size(16.dp),
                                      tint = if (showFaceBoxes) FfRed
                                             else MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             // TRASH, on the same bottom edge as the other tiles' delete.
-                            IconButton(onClearTarget, enabled = idle, modifier = Modifier.size(26.dp)) {
+                            IconButton(onClearTarget, enabled = idle, modifier = Modifier.size(28.dp)) {
                                 Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_target),
-                                     Modifier.size(14.dp),
+                                     Modifier.size(16.dp),
                                      tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
@@ -1077,12 +1077,12 @@ fun SwapScreen(
                         // audio, and the microphone is the one source every user has -- no file
                         // to go find first.
                         if (idle) {
-                            IconButton(onToggleRecordVoice, modifier = Modifier.size(26.dp)) {
+                            IconButton(onToggleRecordVoice, modifier = Modifier.size(28.dp)) {
                                 Icon(painterResource(if (recordingVoice) R.drawable.ic_stop
                                                      else R.drawable.ic_mic),
                                      stringResource(if (recordingVoice) R.string.swap_voice_stop
                                                     else R.string.swap_voice_record),
-                                     Modifier.size(14.dp),
+                                     Modifier.size(16.dp),
                                      tint = if (recordingVoice) MaterialTheme.colorScheme.error
                                             else MaterialTheme.colorScheme.onSurfaceVariant)
                             }
@@ -1090,9 +1090,9 @@ fun SwapScreen(
                     },
                     bottomActions = {
                         if (hasVoice && idle) {
-                            IconButton(onClearVoice, modifier = Modifier.size(26.dp)) {
+                            IconButton(onClearVoice, modifier = Modifier.size(28.dp)) {
                                 Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_voice),
-                                     Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                     Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     },
@@ -1207,8 +1207,9 @@ fun SwapScreen(
                             Icon(
                                 IconDownload,
                                 stringResource(R.string.out_save_frame),
-                                // 同一行触发头的净显示规格：22 dp。
+                                // 同一行触发头的净显示规格：22 dp；与其它图标同色。
                                 Modifier.size(22.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
@@ -1866,13 +1867,13 @@ fun SwapScreen(
                     enabled = if (batchMode) batchSaveAllReady else (idle || run.canCancel),
                     modifier = Modifier.size(26.dp),
                 ) {
-                    // ⚠ Explicit tint, not the inherited content colour: a disabled
-                    // IconButton multiplies the inherited colour by Compose's own disabled
-                    // alpha (0.38), which would stack with ours. A fixed colour at exactly
-                    // the requested 31% keeps the dim state honest.
+                    // ⚠ Explicit tint: a disabled IconButton multiplies the inherited
+                    // colour by Compose's own disabled alpha (0.38), which would stack
+                    // with ours. Enabled reads onSurfaceVariant like every other icon;
+                    // disabled is a fixed colour at exactly 31% so the dim stays honest.
                     val tint = if (batchMode && !batchSaveAllReady)
                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.31f)
-                               else LocalContentColor.current
+                               else MaterialTheme.colorScheme.onSurfaceVariant
                     Icon(
                         IconDownload,
                         stringResource(R.string.swap_save_to_gallery),
