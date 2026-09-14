@@ -24,6 +24,7 @@
 
     <string name="swap_source_face">來源人臉</string>
     <string name="swap_source_pick">選擇來源人臉</string>
+    <string name="swap_switch_source">切換來源人臉</string>
     <string name="swap_pane_original">原圖</string>
     <string name="swap_pane_target">目標</string>
     <string name="swap_pane_swapped">換臉結果</string>

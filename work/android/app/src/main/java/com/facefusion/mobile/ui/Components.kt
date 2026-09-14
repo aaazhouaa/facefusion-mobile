@@ -801,7 +801,7 @@ fun FaceTile(
      * tile is the target picker first, a face picker second.
      */
     onPickFace: ((Float, Float) -> Unit)? = null,
-    /** Overlay pinned to the tile's BOTTOM-START corner, on top of the content
+    /** Overlay pinned to the content area's BOTTOM-END corner, on top of the content
      *  (the source tile's expand arrow, the voice tile's settings gear). */
     footer: (@Composable () -> Unit)? = null,
 ) {
@@ -944,7 +944,7 @@ fun FaceTile(
                     }
                 }
                 }
-                Box(Modifier.align(Alignment.BottomStart)) { footer?.invoke() }
+                Box(Modifier.align(Alignment.BottomEnd)) { footer?.invoke() }
                 }
             }
             // Small actions (camera, change, delete…), stacked in a column flush
@@ -994,39 +994,50 @@ private fun FaceTileFilled(
         // bottom-pinned column flush against the content, inside the same
         // surface. Only the content itself stretches to the row's leftover width.
         Row(verticalAlignment = Alignment.Bottom) {
-            if (bitmap != null) {
-                val image = remember(bitmap) { bitmap.asImageBitmap() }
-                Image(
-                    image, label,
-                    Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .clip(RoundedCornerShape(16.dp)),
-                    contentScale = ContentScale.Crop,
-                )
-            } else {
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                ) {
-                    if (actionIcon != null) {
-                        Icon(
-                            actionIcon, null,
-                            Modifier.size(26.dp),
-                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+            // The content gets its own box so the footer can pin to the CONTENT area's
+            // bottom-end corner -- the tile's right edge is the icon column, and a sheet
+            // anchor landing there would open over the mic and delete.
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+            ) {
+                if (bitmap != null) {
+                    val image = remember(bitmap) { bitmap.asImageBitmap() }
+                    Image(
+                        image, label,
+                        Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(16.dp)),
+                        contentScale = ContentScale.Crop,
+                    )
+                } else {
+                    Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                    ) {
+                        if (actionIcon != null) {
+                            Icon(
+                                actionIcon, null,
+                                Modifier.size(26.dp),
+                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
+                            )
+                        }
+                        Text(
+                            placeholder,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 6.dp),
                         )
                     }
-                    Text(
-                        placeholder,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = 6.dp),
-                    )
+                }
+                // Same bottom-end overlay seat as the compact tiles' footer (the source
+                // tile's expand arrow): drawn ON TOP of the content.
+                if (footer != null) {
+                    Box(Modifier.align(Alignment.BottomEnd)) { footer() }
                 }
             }
             // Small actions (record, delete…), stacked in a column flush against the
@@ -1038,11 +1049,6 @@ private fun FaceTileFilled(
                 actions()
                 bottomActions()
             }
-        }
-        // Same bottom-start overlay seat as the compact tiles' footer (the source
-        // tile's expand arrow): drawn ON TOP of the content, inside the tile surface.
-        if (footer != null) {
-            Box(Modifier.align(Alignment.BottomStart)) { footer() }
         }
     }
 }

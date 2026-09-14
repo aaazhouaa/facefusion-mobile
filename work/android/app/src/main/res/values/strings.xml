@@ -36,6 +36,7 @@
     <!-- ==================================================== swap screen -->
     <string name="swap_source_face">Source face</string>
     <string name="swap_source_pick">Pick source face</string>
+    <string name="swap_switch_source">Switch source face</string>
     <string name="swap_pane_original">Original</string>
     <!-- The same pane BEFORE a target is picked, where "Original" would name something
          that is not there yet. It is the counterpart of "Source face". -->

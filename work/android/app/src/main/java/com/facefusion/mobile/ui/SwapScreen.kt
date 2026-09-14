@@ -18,10 +18,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -38,7 +38,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -411,6 +410,10 @@ fun SwapScreen(
     // dx/dy cannot place the sheet. Measuring sidesteps that.
     var voiceGearPos by remember { mutableStateOf(Offset.Zero) }
     var voiceGearH by remember { mutableIntStateOf(0) }
+    // The source tile's expand arrow, same measured-anchor treatment: it moved from the
+    // tile's left to its right, so the old "arrow hugs the row's left edge" dx is gone.
+    var sourceArrowPos by remember { mutableStateOf(Offset.Zero) }
+    var sourceArrowH by remember { mutableIntStateOf(0) }
     // The log panel folds under its caption. Default CLOSED -- it is a debug readout,
     // and a standing 170 dp panel below the buttons made the page longer than it needed
     // to be on every screen, not just while something was running.
@@ -699,18 +702,33 @@ fun SwapScreen(
                     },
                     footer = if (hasSource) {
                         {
-                            Box(Modifier.padding(start = 4.dp, bottom = 2.dp)) {
-                                Icon(
-                                    Icons.Default.KeyboardArrowDown,
-                                    stringResource(if (sourcePickerExpanded) R.string.common_collapse
-                                                   else R.string.common_expand),
-                                    Modifier
-                                        .size(18.dp)
-                                        .rotate(if (sourcePickerExpanded) 0f else 180f)
-                                        .clickable { sourcePickerExpanded = !sourcePickerExpanded },
-                                    tint = Color.White,
-                                )
-                                if (sourcePickerExpanded) {
+                            Box(Modifier.padding(end = 4.dp)) {
+                                // Not a collapse chevron: this opens a picker (the source
+                                // faces, plus the per-person switch), so the affordance is
+                                // the list glyph that says "a set of choices lives behind
+                                // this", and it does not flip when open.
+                                HintIcon(stringResource(R.string.swap_switch_source)) {
+                                    Icon(
+                                        Icons.AutoMirrored.Filled.List,
+                                        stringResource(R.string.swap_switch_source),
+                                        // Same 28 dp box / 6 dp inset as the icon column's
+                                        // buttons and the voice gear, so the 16 dp glyph
+                                        // sits 6 dp off the tile's bottom edge like they do
+                                        // -- an 18 dp glyph flush to the edge would ride
+                                        // higher than its neighbours.
+                                        Modifier
+                                            .size(28.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .onGloballyPositioned {
+                                                sourceArrowPos = it.positionInWindow()
+                                                sourceArrowH = it.size.height
+                                            }
+                                            .clickable { sourcePickerExpanded = !sourcePickerExpanded }
+                                            .padding(6.dp),
+                                        tint = Color.White,
+                                    )
+                                }
+                                if (sourcePickerExpanded && sourceArrowH > 0) {
                                     val density = LocalDensity.current
                                     val sheetW = with(density) {
                                         inputRowW.toDp().takeIf { inputRowW > 0 } ?: Dp.Unspecified
@@ -722,17 +740,16 @@ fun SwapScreen(
                                         MaterialTheme.colorScheme.outlineVariant,
                                         childShape,
                                     )
-                                    // Arrow is now at the tile's left, so the sheet's centre
-                                    // is rowCentre minus the arrow's centre (~13 dp).
-                                    val dx = with(density) {
-                                        (inputRowW / 2f - 13.dp.toPx()).roundToInt()
-                                    }
+                                    // Same measured placement as the voice gear's sheet:
+                                    // screen-centred horizontally, its top just under the
+                                    // tile. A hard-coded dx/dy cannot work any more -- the
+                                    // arrow no longer sits at the row's left edge.
+                                    val dx = ((with(density) { screenW.dp.toPx() } - inputRowW) / 2f -
+                                              sourceArrowPos.x).roundToInt()
+                                    val dy = sourceArrowH + with(density) { 3.dp.roundToPx() }
                                     Popup(
-                                        alignment = Alignment.TopCenter,
-                                        offset = IntOffset(
-                                            dx,
-                                            with(density) { 22.dp.roundToPx() },
-                                        ),
+                                        alignment = Alignment.TopStart,
+                                        offset = IntOffset(dx, dy),
                                         onDismissRequest = { sourcePickerExpanded = false },
                                         properties = PopupProperties(focusable = true),
                                     ) {
