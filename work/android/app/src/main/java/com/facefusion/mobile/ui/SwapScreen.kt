@@ -1231,13 +1231,13 @@ fun SwapScreen(
                             Icons.Default.Settings,
                             stringResource(R.string.swap_output_settings),
                             Modifier
-                                .size(26.dp)
+                                .size(32.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .clickable {
                                     trimExpanded = !trimExpanded
                                     if (trimExpanded) batchMenuExpanded = false
                                 }
-                                .padding(4.dp),
+                                .padding(6.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -1247,37 +1247,39 @@ fun SwapScreen(
                         painterResource(R.drawable.ic_playlist_add),
                         stringResource(R.string.swap_batch_menu),
                         Modifier
-                            .size(26.dp)
+                            .size(32.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .clickable {
                                 batchMenuExpanded = !batchMenuExpanded
                                 if (batchMenuExpanded) trimExpanded = false
                             }
-                            .padding(4.dp),
+                            .padding(6.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     // 自动保存开关：Save 图标，启用时主题色（深），未启用时浅灰。
+                    // 与两个触发头同规格：32dp 盒、6dp 内边距，净显示 20dp。
                     Icon(
                         painterResource(R.drawable.ic_save),
                         stringResource(R.string.batch_autosave),
                         Modifier
-                            .size(16.dp)
-                            .clip(RoundedCornerShape(4.dp))
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(8.dp))
                             .clickable(enabled = idle) { onBatchAutoSave(!batchAutoSave) }
-                            .padding(1.dp),
+                            .padding(6.dp),
                         tint = if (batchAutoSave) MaterialTheme.colorScheme.primary
                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
                     )
-                    // 清空全部。16dp 图标；队列空时不透明度降到 31%，读作"没有可清的
-                    // 东西"，但仍占着位置。跑批中同样 31%：图标已被禁用，全亮会读作可点。
+                    // 清空全部。20dp 图标，无内边距，与触发头同净显示；队列空时
+                    // 不透明度降到 31%，读作"没有可清的东西"，但仍占着位置。跑批中
+                    // 同样 31%：图标已被禁用，全亮会读作可点。
                     IconButton(
                         onClearBatch,
                         enabled = idle && batch.isNotEmpty(),
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(20.dp),
                     ) {
                         Icon(Icons.Default.Delete,
                              stringResource(R.string.batch_clear_desc),
-                             Modifier.size(16.dp),
+                             Modifier.size(20.dp),
                              tint = MaterialTheme.colorScheme.onSurfaceVariant
                                  .copy(alpha = if (idle && batch.isNotEmpty()) 1f else 0.31f))
                     }
