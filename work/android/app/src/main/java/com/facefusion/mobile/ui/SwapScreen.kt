@@ -1241,18 +1241,20 @@ fun SwapScreen(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Text(
+                    // 批量添加入口：图标而非文本，与左侧齿轮同一触发头样式；
+                    // 语义名（“批量添加”）给无障碍与长按提示。
+                    Icon(
+                        painterResource(R.drawable.ic_playlist_add),
                         stringResource(R.string.swap_batch_menu),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp,
-                        modifier = Modifier
+                        Modifier
+                            .size(26.dp)
                             .clip(RoundedCornerShape(8.dp))
                             .clickable {
                                 batchMenuExpanded = !batchMenuExpanded
                                 if (batchMenuExpanded) trimExpanded = false
                             }
-                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                            .padding(4.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     // 自动保存开关。
                     Row(

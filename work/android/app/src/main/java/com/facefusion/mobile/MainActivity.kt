@@ -2667,7 +2667,11 @@ class MainActivity : ComponentActivity() {
                         swappedFrameOwner = targetVersion
                         previewNote = null
                     } else if (out.faces == 0) {
+                        // Same convention as the settle path: with no face the output IS
+                        // the input, so show the frame rather than leave a stale one up.
                         previewNote = getString(R.string.status_no_face)
+                        swappedFrame = fast
+                        swappedFrameOwner = targetVersion
                     }
                 }
             }
@@ -2854,10 +2858,14 @@ class MainActivity : ComponentActivity() {
                     out.error != null -> { previewNote = out.error; swappedFrame = null; swappedFrameOwner = null }
                     out.faces == 0 -> {
                         // processFrame leaves the buffer untouched when it finds nothing, so
-                        // without this the pane would show the ORIGINAL and look like a
-                        // swap that did nothing.
+                        // out.bitmap IS the input frame here -- not a missing result. Show
+                        // it: an empty pane with only a sentence erased what the user was
+                        // looking at, and the note below the image still says why no swap
+                        // happened. The version stamp follows, so Save/keep display rules
+                        // behave exactly like a swapped frame.
                         previewNote = getString(R.string.status_no_face)
-                        swappedFrame = null; swappedFrameOwner = null
+                        swappedFrame = frame
+                        swappedFrameOwner = targetVersion
                     }
                     else -> {
                         // 盖上当前目标的版本戳：这帧换脸属于刚校验过的 targetVersion，
