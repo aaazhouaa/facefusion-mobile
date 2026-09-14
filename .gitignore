@@ -122,3 +122,6 @@ work/local.properties
 # Local tooling, never commit
 local.properties
 .codegraph/
+
+# AiCode runtime (memory, permissions) -- local-only, never in the repo
+.aicode/
