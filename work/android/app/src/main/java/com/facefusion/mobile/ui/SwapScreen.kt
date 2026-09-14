@@ -351,9 +351,10 @@ fun SwapScreen(
     //
     // ⚠ Budgets are TIGHT on purpose. Every dp the panes take is a dp the Swap button is
     // pushed below the fold; the report "the button vanished after picking a target" was
-    // this arithmetic, not a rendering bug. The processor card is collapsed by default (see
-    // processorsExpanded) and the trim card too, so the panes are the only large blocks on
-    // a fresh target -- and even so their combined height has to leave room for the button.
+    // this arithmetic, not a rendering bug. The processor and trim cards no longer stand on
+    // the page at all (the stages moved under the target tile's gear), so the panes are the
+    // only large blocks on a fresh target -- and even so their combined height has to leave
+    // room for the button.
     val paneHeight = if (targetAspect < 1f) (screenH - 480).coerceIn(140, 300).dp
                      else ((screenH - 560) / 2).coerceIn(100, 240).dp
 
@@ -368,13 +369,6 @@ fun SwapScreen(
     // does not close it mid-adjustment.
     var settingsFor by rememberSaveable { mutableStateOf<String?>(null) }
     var confirmDeleteOutput by rememberSaveable { mutableStateOf(false) }
-    // The processor stages collapse under their title. Default CLOSED: three chips plus a
-    // caption cost ~160 dp standing, and a fresh target already carries the workbench row
-    // and the swapped pane -- the Swap button used to be pushed below the fold by exactly
-    // that much. The header's "n / 3" readout still says how many stages are armed, so a
-    // folded card is not a silent one. The state is saved so a rotation does not silently
-    // re-open a row the user just folded away.
-    var processorsExpanded by rememberSaveable { mutableStateOf(false) }
     var sourcePickerExpanded by rememberSaveable { mutableStateOf(false) }
     var inputRowW by remember { mutableIntStateOf(0) }
     // Output settings live on ONE foldable card, default CLOSED: "Clip" (the trim) is the
@@ -410,6 +404,11 @@ fun SwapScreen(
     // dx/dy cannot place the sheet. Measuring sidesteps that.
     var voiceGearPos by remember { mutableStateOf(Offset.Zero) }
     var voiceGearH by remember { mutableIntStateOf(0) }
+    // The target tile's settings gear, same measured-anchor treatment: the popup holds the
+    // three pipeline stages, so they sit beside the input they act on.
+    var targetGearPos by remember { mutableStateOf(Offset.Zero) }
+    var targetGearH by remember { mutableIntStateOf(0) }
+    var targetSettingsExpanded by rememberSaveable { mutableStateOf(false) }
     // The source tile's expand arrow, same measured-anchor treatment: it moved from the
     // tile's left to its right, so the old "arrow hugs the row's left edge" dx is gone.
     var sourceArrowPos by remember { mutableStateOf(Offset.Zero) }
@@ -431,216 +430,6 @@ fun SwapScreen(
             .padding(horizontal = 18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        // ---------------------------------------------------------------- processors
-        //
-        // Above Advanced, and named the way FaceFusion names them. The enhancer is a
-        // PROCESSOR -- a stage that either runs or does not -- and burying its on/off
-        // switch three taps deep inside "Advanced", next to blend weights and detector
-        // thresholds, filed a yes/no question with the dials. FaceFusion puts the same two
-        // side by side at the top; so does this now.
-        //
-        // face_swapper is drawn selected and is not clickable: this app IS the swapper, and
-        // a control that cannot be turned off should still be visible, because the row is
-        // there to say WHICH stages will run.
-        run {
-            // The stages live on their own card -- see SectionCard -- so the chips read as
-            // one thing that belongs together rather than a row adrift in the scroll. The
-            // trailing readout says how many of the three stages are armed, which the
-            // chips themselves only imply.
-            SectionCard(
-                stringResource(R.string.swap_processors),
-                trailing = {
-                    Text(
-                        "${listOf(true, opts.faceEnhance, opts.lipSync).count { it }} / 3",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                },
-                collapsible = true,
-                expanded = processorsExpanded,
-                onToggle = { processorsExpanded = !processorsExpanded },
-            ) {
-            // Styled after upstream FaceFusion's own web UI, which is what these controls
-            // are a port of: ON is a solid accent chip with a contrasting label and a
-            // filled disc holding a check; OFF is a plain surface chip with a flat grey
-            // disc and no check. The accent is the theme's monochrome primary (dark on
-            // light scheme, light on dark), defined in ui/Theme.kt.
-            //
-            // Deliberately NOT Material3's default FilterChip look, which says "selected"
-            // with a faint tonal wash and a bare tick. Upstream's row is the thing a user
-            // arriving from the desktop app already knows how to read.
-            @Composable
-            fun ProcessorChip(
-                name: String,
-                /** What the downloader calls this stage's model; "" for one always present. */
-                model: String,
-                installed: Boolean,
-                on: Boolean,
-                available: Boolean,
-                onToggle: () -> Unit,
-                // The gear, drawn INSIDE the chip at its trailing edge. Null for a chip
-                // with nothing to configure; also hidden while the model is missing, where
-                // the chip's job is to offer the download and settings would be settings
-                // for something that cannot run.
-                onSettings: (() -> Unit)? = null,
-            ) {
-                val active = installed && on && available
-                val clickable = idle && (!installed || available)
-                Surface(
-                    onClick = { if (installed) onToggle() else onRequestModel(name, model) },
-                    enabled = clickable,
-                    shape = RoundedCornerShape(8.dp),
-                    // The chip's fill matches the other controls (cards, buttons) -- the
-                    // theme's surface -- not the page background. Selection is carried by
-                    // the border (primary when a stage is ON, outlineVariant when off) and
-                    // the check disc, never by a fill.
-                    color = MaterialTheme.colorScheme.surface,
-                    border = BorderStroke(
-                        // A single hairline in both states: the border is a separator, not
-                        // a selection bar -- selection reads from the primary colour, the
-                        // check disc and the bold label.
-                        1.dp,
-                        if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.69f)
-                        else MaterialTheme.colorScheme.outlineVariant,
-                    ),
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Box(
-                            Modifier
-                                .size(18.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    when {
-                                        // Filled with the accent (text colour) now that the
-                                        // chip itself is page-coloured.
-                                        active -> MaterialTheme.colorScheme.primary.copy(alpha = 0.69f)
-                                        // A model that is not on the device gets a hollow
-                                        // disc, so "off" and "not installed" are not the
-                                        // same picture. Upstream has no such state.
-                                        !installed -> Color.Transparent
-                                        else -> MaterialTheme.colorScheme.outlineVariant
-                                    }
-                                )
-                                .then(
-                                    if (!installed)
-                                        Modifier.border(1.dp, MaterialTheme.colorScheme.outline,
-                                                        CircleShape)
-                                    else Modifier
-                                ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (active) {
-                                Icon(Icons.Default.Check, null, Modifier.size(12.dp),
-                                     tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.69f))
-                            } else if (!installed) {
-                                Icon(Icons.Default.Add, null, Modifier.size(12.dp),
-                                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                        Text(
-                            name,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = when {
-                                active -> MaterialTheme.colorScheme.onBackground
-                                !installed -> MaterialTheme.colorScheme.onSurfaceVariant
-                                else -> MaterialTheme.colorScheme.onSurface
-                            },
-                            fontWeight = if (active) FontWeight.SemiBold
-                                        else FontWeight.Normal,
-                            // ⚠ weight(fill = false) is what keeps every gear THE SAME
-                            // SIZE. Row does not wrap, it SQUEEZES, and with two chips
-                            // across a phone the squeeze landed on whichever child had no
-                            // weight -- the icon. So face_swapper and face_enhancer, which
-                            // share a row, drew a visibly smaller gear than lip_syncer,
-                            // which has its row to itself. A weighted child is measured
-                            // with what is LEFT after the unweighted ones, so the label now
-                            // absorbs the shortfall (it ellipsises) and the gear never
-                            // changes size. fill = false so a short label still does not
-                            // stretch the chip.
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                        // Its own clickable inside the chip's, which Compose resolves to the
-                        // innermost -- so the gear opens settings and does NOT also toggle
-                        // the stage underneath it. 22 dp of touch target inside a 36 dp
-                        // chip is below the 48 dp guideline, but a chip that grew to hold a
-                        // 48 dp box would no longer fit two across a phone, which is the
-                        // layout constraint this row is already built around.
-                        if (installed && onSettings != null) {
-                            HintIcon(stringResource(R.string.swap_proc_settings, name)) {
-                                Icon(
-                                    Icons.Default.Settings,
-                                    stringResource(R.string.swap_proc_settings, name),
-                                    Modifier
-                                        .size(18.dp)
-                                        .clip(CircleShape)
-                                        .clickable(enabled = idle) { onSettings() }
-                                        .alpha(if (idle) 1f else 0.31f),
-                                    tint = if (active) MaterialTheme.colorScheme.onBackground
-                                           else MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Two rows of two, upstream's shape. Three chips do not fit across a phone and
-            // Row does not wrap -- it SQUEEZES, so labels lose their shape rather than
-            // moving down, and these are upstream's identifiers.
-            //
-            // 8 dp both ways here, unlike the Material chips this replaces: a Surface has
-            // no enforced 48 dp interactive box padding it out, so the spacing asked for
-            // is the spacing seen.
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    // face_swapper is always on and cannot be turned off: this app IS the
-                    // swapper. It still gets a chip, because the row exists to say WHICH
-                    // stages run.
-                    ProcessorChip(
-                        name = stringResource(R.string.swap_proc_swapper),
-                        // Always installed -- missing() makes it a REQUIRED model, so the
-                        // app never reaches this row without it.
-                        model = "",
-                        installed = true, on = true, available = true, onToggle = {},
-                        onSettings = { settingsFor = "swapper" },
-                    )
-                    ProcessorChip(
-                        name = stringResource(R.string.swap_proc_enhancer),
-                        model = "gpen",
-                        installed = hasEnhancer,
-                        on = opts.faceEnhance,
-                        available = true,
-                        onToggle = { onOptsChange(opts.copy(faceEnhance = !opts.faceEnhance)) },
-                        onSettings = { settingsFor = "enhancer" },
-                    )
-                }
-                // ⚠ `available` is false only once a PHOTO is picked. `durationMs > 0`
-                // alone was false on an empty screen, so the chip greyed out the moment the
-                // app opened and looked broken beside face_enhancer, which needs no target.
-                // There is nothing to say no about until there is a target.
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ProcessorChip(
-                        name = stringResource(R.string.swap_proc_lip_syncer),
-                        // edtalk, matching hasLipSyncer -- wav2lip is not offered because
-                        // ffpipe no longer opens it.
-                        model = "edtalk",
-                        installed = hasLipSyncer,
-                        on = opts.lipSync,
-                        available = !hasTarget || durationMs > 0,
-                        onToggle = { onOptsChange(opts.copy(lipSync = !opts.lipSync)) },
-                        onSettings = { settingsFor = "lipsync" },
-                    )
-                }
-                }
-            }
-        }
-
         // ---------------------------------------------------------------- inputs
         //
         // SOURCE and TARGET share one 72 dp row (VOICE joins it as a third equal slot
@@ -651,14 +440,24 @@ fun SwapScreen(
         // before/after -- its frame shows the source frame of the swap -- so there is no
         // separate full-width "original" pane below any more.
         //
-        // No wrapping card: the three tiles sit directly in one Row, 8 dp apart, each
-        // with FaceTile's own 16 dp rounded surface -- the group reads as one input row
-        // while every tile keeps its own frame.
+        // ONE card holds the three inputs and the arrow between source and target: same
+        // surface as every other group on the page, but no outline of its own -- the
+        // frame is drawn on each tile instead, so the tiles read as the framed elements.
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(horizontal = 12.dp, vertical = 12.dp),
+        ) {
         Row(
             Modifier
                 .fillMaxWidth()
                 .onGloballyPositioned { inputRowW = it.size.width },
-            verticalAlignment = Alignment.CenterVertically,
+            verticalAlignment = Alignment.Top,
+            // Source, the arrow and target keep their 8 dp gaps and start from the card's
+            // left edge; the voice tile (when Lip Sync is on) carries a weight and so
+            // takes whatever width is left over, right to the card's edge.
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
                 FaceTile(
@@ -674,7 +473,7 @@ fun SwapScreen(
                         // The camera stays through a run -- vanishing mid-swap made the
                         // tile jump -- dimmed to 31% (a 69% opacity drop) and deaf to taps
                         // until the run ends.
-                        IconButton(onCaptureSource, Modifier.size(28.dp), enabled = idle) {
+                        IconButton(onCaptureSource, Modifier.size(24.dp), enabled = idle) {
                             HintIcon(stringResource(R.string.swap_capture_source)) {
                                 Icon(painterResource(R.drawable.ic_photo_camera),
                                      stringResource(R.string.swap_capture_source), Modifier.size(16.dp),
@@ -689,7 +488,7 @@ fun SwapScreen(
                         //
                         // Same as the camera above: visible through a run, 31%, inert.
                         if (hasSource) {
-                            IconButton(onClearSource, Modifier.size(28.dp), enabled = idle) {
+                            IconButton(onClearSource, Modifier.size(24.dp), enabled = idle) {
                                 HintIcon(stringResource(R.string.swap_remove_source)) {
                                     Icon(Icons.Default.Delete,
                                          stringResource(R.string.swap_remove_source),
@@ -702,7 +501,7 @@ fun SwapScreen(
                     },
                     footer = if (hasSource) {
                         {
-                            Box(Modifier.padding(end = 4.dp)) {
+                            Box {
                                 // Not a collapse chevron: this opens a picker (the source
                                 // faces, plus the per-person switch), so the affordance is
                                 // the list glyph that says "a set of choices lives behind
@@ -711,21 +510,24 @@ fun SwapScreen(
                                     Icon(
                                         Icons.AutoMirrored.Filled.List,
                                         stringResource(R.string.swap_switch_source),
-                                        // Same 28 dp box / 6 dp inset as the icon column's
-                                        // buttons and the voice gear, so the 16 dp glyph
-                                        // sits 6 dp off the tile's bottom edge like they do
-                                        // -- an 18 dp glyph flush to the edge would ride
-                                        // higher than its neighbours.
+                                        // 24 dp box as before, but 1 dp of inset instead of 4:
+                                        // the glyph displays 6 dp taller (16 -> 22 dp), so the
+                                        // thin list lines read the same height as the solid
+                                        // camera/trash glyphs beside them. The box -- and so
+                                        // the row -- does not change size.
                                         Modifier
-                                            .size(28.dp)
+                                            .size(24.dp)
                                             .clip(RoundedCornerShape(8.dp))
                                             .onGloballyPositioned {
                                                 sourceArrowPos = it.positionInWindow()
                                                 sourceArrowH = it.size.height
                                             }
                                             .clickable { sourcePickerExpanded = !sourcePickerExpanded }
-                                            .padding(6.dp),
-                                        tint = Color.White,
+                                            .padding(1.dp),
+                                        // onSurfaceVariant, like the strip's other icons: this
+                                        // glyph no longer sits on the photo (where white
+                                        // showed), it sits on the card's own surface.
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
                                 if (sourcePickerExpanded && sourceArrowH > 0) {
@@ -893,13 +695,17 @@ fun SwapScreen(
                         }
                     } else null,
                 )
-                // ⇒ marks the direction of the swap: the source face BECOMES the
-                // target. The Row's verticalAlignment centres it between the two tiles.
-                Text(
-                    "⇒",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
+                // ⇒ marks the direction of the swap: the source face BECOMES the target.
+                // Boxed to the CONTENT square's height and centred in it, so the arrow
+                // lines up with the two tiles' pictures -- not with the whole tile, whose
+                // icon strip hangs below the picture.
+                Box(Modifier.height(80.dp), contentAlignment = Alignment.Center) {
+                    Text(
+                        "⇒",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
                 // The tile is a 72 dp square -- it never needs more than a couple of
                 // hundred pixels of the original. Drawing the full 4096-edge frame (a
                 // 64 MB ARGB bitmap) into that square on every scroll pass is half the
@@ -936,7 +742,7 @@ fun SwapScreen(
                             // is when someone deciding what to swap needs it. Two buttons because a
                             // still and a clip take different routes through the system camera, and
                             // one button that then asks which is a tap for a question the icons answer.
-                            IconButton(onCapturePhoto, enabled = idle, modifier = Modifier.size(28.dp)) {
+                            IconButton(onCapturePhoto, enabled = idle, modifier = Modifier.size(24.dp)) {
                                 HintIcon(stringResource(R.string.swap_capture_photo)) {
                                     Icon(painterResource(R.drawable.ic_photo_camera),
                                          stringResource(R.string.swap_capture_photo), Modifier.size(16.dp),
@@ -949,7 +755,7 @@ fun SwapScreen(
                     bottomActions = {
                         // VIDEO CAMERA, back on its original seat in the bottom-right corner.
                         if (!hasTarget) {
-                            IconButton(onCaptureVideo, enabled = idle, modifier = Modifier.size(28.dp)) {
+                            IconButton(onCaptureVideo, enabled = idle, modifier = Modifier.size(24.dp)) {
                                 HintIcon(stringResource(R.string.swap_capture_video)) {
                                     Icon(painterResource(R.drawable.ic_videocam),
                                          stringResource(R.string.swap_capture_video), Modifier.size(16.dp),
@@ -963,7 +769,7 @@ fun SwapScreen(
                         // frame, so the switch lives beside them. Icon goes red while on.
                         if (hasTarget) {
                             IconButton(onToggleFaceBoxes, enabled = idle,
-                                       modifier = Modifier.size(28.dp)) {
+                                       modifier = Modifier.size(24.dp)) {
                                 HintIcon(stringResource(R.string.swap_show_faces)) {
                                     Icon(Icons.Default.Face,
                                          stringResource(R.string.swap_show_faces),
@@ -974,7 +780,7 @@ fun SwapScreen(
                                 }
                             }
                             // TRASH, on the same bottom edge as the other tiles' delete.
-                            IconButton(onClearTarget, enabled = idle, modifier = Modifier.size(28.dp)) {
+                            IconButton(onClearTarget, enabled = idle, modifier = Modifier.size(24.dp)) {
                                 HintIcon(stringResource(R.string.swap_remove_target)) {
                                     Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_target),
                                          Modifier.size(16.dp),
@@ -990,18 +796,92 @@ fun SwapScreen(
                     faceBoxes = preview.faceBoxes,
                     referenceBox = preview.referenceBox,
                     onPickFace = if (showFaceBoxes && !assignMode && idle) onPickFace else null,
+                    // The stage chips used to stand on their own card above this row. They
+                    // live behind this gear now: the stages act on the TARGET, so they sit
+                    // beside the input they configure (and a fresh screen loses ~160 dp).
+                    // Trailing: the gear closes the strip's right end, mirroring the
+                    // source tile's list glyph at its left.
+                    footerTrailing = true,
+                    footer = {
+                        Box {
+                            HintIcon(
+                                stringResource(R.string.swap_processors),
+                                Modifier.onGloballyPositioned {
+                                    targetGearPos = it.positionInWindow()
+                                    targetGearH = it.size.height
+                                },
+                            ) {
+                                Icon(
+                                    Icons.Default.Settings,
+                                    stringResource(R.string.swap_processors),
+                                    // 24 dp box, same as the strip's action buttons.
+                                    Modifier
+                                        .size(24.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { targetSettingsExpanded = true }
+                                        .padding(4.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            if (targetSettingsExpanded && targetGearH > 0) {
+                                val density = LocalDensity.current
+                                val sheetW = with(density) {
+                                    inputRowW.toDp().takeIf { inputRowW > 0 } ?: Dp.Unspecified
+                                }
+                                val sheetShape = RoundedCornerShape(20.dp)
+                                // Same measured placement as the other two gear sheets:
+                                // screen-centred horizontally, its top just under the tile.
+                                val dx = ((with(density) { screenW.dp.toPx() } - inputRowW) / 2f -
+                                          targetGearPos.x).roundToInt()
+                                val dy = targetGearH + with(density) { 3.dp.roundToPx() }
+                                Popup(
+                                    alignment = Alignment.TopStart,
+                                    offset = IntOffset(dx, dy),
+                                    onDismissRequest = { targetSettingsExpanded = false },
+                                    properties = PopupProperties(focusable = true),
+                                ) {
+                                    Column(
+                                        Modifier
+                                            .width(sheetW)
+                                            .shadow(12.dp, sheetShape)
+                                            .clip(sheetShape)
+                                            .background(MaterialTheme.colorScheme.surface)
+                                            .border(
+                                                1.dp,
+                                                MaterialTheme.colorScheme.outlineVariant,
+                                                sheetShape,
+                                            )
+                                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                                    ) {
+                                        ProcessorsPanel(
+                                            opts = opts,
+                                            onOptsChange = onOptsChange,
+                                            hasEnhancer = hasEnhancer,
+                                            hasLipSyncer = hasLipSyncer,
+                                            hasTarget = hasTarget,
+                                            durationMs = durationMs,
+                                            idle = idle,
+                                            onRequestModel = onRequestModel,
+                                            onOpenSettings = { targetSettingsExpanded = false
+                                                               settingsFor = it },
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    },
                 )
                 if (opts.lipSync) FaceTile(
                     label = stringResource(R.string.swap_pane_voice),
                     bitmap = null,
                     placeholder = if (hasVoice) (voiceName ?: stringResource(R.string.swap_voice_picked))
                                   else stringResource(R.string.swap_voice_add),
+                    // The one tile that stretches: it takes the row's leftover width, so
+                    // its surface reaches the card's right edge, and its content fills
+                    // that width -- a long voice name needs the room.
                     modifier = Modifier.weight(1f),
-                    // Same stretch as before: one surface that fills the row's leftover
-                    // width, content centred -- but the mic and delete now sit in the
-                    // SAME bottom-pinned icon column (3 dp beside the content) as the
-                    // source and target tiles.
-                    fill = true,
+                    stretch = true,
                     // The tile IS the picker, except while a clip is loaded or the mic is
                     // live -- the record button owns the interaction then, and the whole-tile
                     // tap must not fire mid-capture.
@@ -1012,7 +892,7 @@ fun SwapScreen(
                         // audio, and the microphone is the one source every user has -- no file
                         // to go find first.
                         if (idle) {
-                            IconButton(onToggleRecordVoice, modifier = Modifier.size(28.dp)) {
+                            IconButton(onToggleRecordVoice, modifier = Modifier.size(24.dp)) {
                                 HintIcon(stringResource(if (recordingVoice) R.string.swap_voice_stop
                                                        else R.string.swap_voice_record)) {
                                     Icon(painterResource(if (recordingVoice) R.drawable.ic_stop
@@ -1029,7 +909,7 @@ fun SwapScreen(
                     },
                     bottomActions = {
                         if (hasVoice && idle) {
-                            IconButton(onClearVoice, modifier = Modifier.size(28.dp).alpha(if (idle) 1f else 0.31f)) {
+                            IconButton(onClearVoice, modifier = Modifier.size(24.dp).alpha(if (idle) 1f else 0.31f)) {
                                 HintIcon(stringResource(R.string.swap_remove_voice)) {
                                     Icon(Icons.Default.Delete, stringResource(R.string.swap_remove_voice),
                                          Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1055,11 +935,12 @@ fun SwapScreen(
                                     Icon(
                                         Icons.Default.Settings,
                                         stringResource(R.string.swap_voice_settings),
+                                        // 24 dp box, same as the strip's action buttons.
                                         Modifier
-                                            .size(28.dp)
+                                            .size(24.dp)
                                             .clip(RoundedCornerShape(8.dp))
                                             .clickable { voiceSettingsMenuExpanded = true }
-                                            .padding(6.dp),
+                                            .padding(4.dp),
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
@@ -1194,6 +1075,7 @@ fun SwapScreen(
                     } else null,
                 )
             }
+        }
 
         // ---------------------------------------------------------------- result
         //
@@ -2297,6 +2179,205 @@ fun SwapScreen(
                 }
             },
         )
+    }
+}
+
+/**
+ * The three pipeline stages -- face_swapper, face_enhancer, lip_syncer -- as the chip
+ * rows upstream FaceFusion draws them in, sized to sit inside the target tile's settings
+ * popup. It was a SectionCard on the page; moving it under the target tile's gear keeps
+ * the stages beside the input they act on and takes ~160 dp off a fresh screen.
+ */
+@Composable
+private fun ProcessorsPanel(
+    opts: SwapOptions,
+    onOptsChange: (SwapOptions) -> Unit,
+    hasEnhancer: Boolean,
+    hasLipSyncer: Boolean,
+    hasTarget: Boolean,
+    durationMs: Long,
+    idle: Boolean,
+    onRequestModel: (String, String) -> Unit,
+    onOpenSettings: (String) -> Unit,
+) {
+    // Two rows of two, upstream's shape. Three chips do not fit across a phone and
+    // Row does not wrap -- it SQUEEZES, so labels lose their shape rather than
+    // moving down, and these are upstream's identifiers.
+    //
+    // 8 dp both ways here, unlike the Material chips this replaces: a Surface has
+    // no enforced 48 dp interactive box padding it out, so the spacing asked for
+    // is the spacing seen.
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // face_swapper is always on and cannot be turned off: this app IS the
+            // swapper. It still gets a chip, because the row exists to say WHICH
+            // stages run.
+            ProcessorChip(
+                name = stringResource(R.string.swap_proc_swapper),
+                // Always installed -- missing() makes it a REQUIRED model, so the
+                // app never reaches this row without it.
+                model = "",
+                installed = true, on = true, available = true,
+                enabled = idle, onToggle = {}, onRequestModel = onRequestModel,
+                onSettings = { onOpenSettings("swapper") },
+            )
+            ProcessorChip(
+                name = stringResource(R.string.swap_proc_enhancer),
+                model = "gpen",
+                installed = hasEnhancer,
+                on = opts.faceEnhance,
+                available = true,
+                enabled = idle,
+                onToggle = { onOptsChange(opts.copy(faceEnhance = !opts.faceEnhance)) },
+                onRequestModel = onRequestModel,
+                onSettings = { onOpenSettings("enhancer") },
+            )
+        }
+        // ⚠ `available` is false only once a PHOTO is picked. `durationMs > 0`
+        // alone was false on an empty screen, so the chip greyed out the moment the
+        // app opened and looked broken beside face_enhancer, which needs no target.
+        // There is nothing to say no about until there is a target.
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ProcessorChip(
+                name = stringResource(R.string.swap_proc_lip_syncer),
+                // edtalk, matching hasLipSyncer -- wav2lip is not offered because
+                // ffpipe no longer opens it.
+                model = "edtalk",
+                installed = hasLipSyncer,
+                on = opts.lipSync,
+                available = !hasTarget || durationMs > 0,
+                enabled = idle,
+                onToggle = { onOptsChange(opts.copy(lipSync = !opts.lipSync)) },
+                onRequestModel = onRequestModel,
+                onSettings = { onOpenSettings("lipsync") },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProcessorChip(
+    /** The stage's label, as upstream names it (face_swapper…). */
+    name: String,
+    /** What the downloader calls this stage's model; "" for one always present. */
+    model: String,
+    installed: Boolean,
+    on: Boolean,
+    available: Boolean,
+    /** False while a run owns the pipeline: the chip goes inert, not away. */
+    enabled: Boolean,
+    onToggle: () -> Unit,
+    /** A stage whose model is missing asks for the download instead of toggling. */
+    onRequestModel: (String, String) -> Unit,
+    // The gear, drawn INSIDE the chip at its trailing edge. Null for a chip
+    // with nothing to configure; also hidden while the model is missing, where
+    // the chip's job is to offer the download and settings would be settings
+    // for something that cannot run.
+    onSettings: (() -> Unit)? = null,
+) {
+    val active = installed && on && available
+    val clickable = enabled && (!installed || available)
+    Surface(
+        onClick = { if (installed) onToggle() else onRequestModel(name, model) },
+        enabled = clickable,
+        shape = RoundedCornerShape(8.dp),
+        // The chip's fill matches the other controls (cards, buttons) -- the
+        // theme's surface -- not the page background. Selection is carried by
+        // the border (primary when a stage is ON, outlineVariant when off) and
+        // the check disc, never by a fill.
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            // A single hairline in both states: the border is a separator, not
+            // a selection bar -- selection reads from the primary colour, the
+            // check disc and the bold label.
+            1.dp,
+            if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.69f)
+            else MaterialTheme.colorScheme.outlineVariant,
+        ),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(
+                Modifier
+                    .size(18.dp)
+                    .clip(CircleShape)
+                    .background(
+                        when {
+                            // Filled with the accent (text colour) now that the
+                            // chip itself is page-coloured.
+                            active -> MaterialTheme.colorScheme.primary.copy(alpha = 0.69f)
+                            // A model that is not on the device gets a hollow
+                            // disc, so "off" and "not installed" are not the
+                            // same picture. Upstream has no such state.
+                            !installed -> Color.Transparent
+                            else -> MaterialTheme.colorScheme.outlineVariant
+                        }
+                    )
+                    .then(
+                        if (!installed)
+                            Modifier.border(1.dp, MaterialTheme.colorScheme.outline,
+                                            CircleShape)
+                        else Modifier
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (active) {
+                    Icon(Icons.Default.Check, null, Modifier.size(12.dp),
+                         tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.69f))
+                } else if (!installed) {
+                    Icon(Icons.Default.Add, null, Modifier.size(12.dp),
+                         tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            Text(
+                name,
+                style = MaterialTheme.typography.labelLarge,
+                color = when {
+                    active -> MaterialTheme.colorScheme.onBackground
+                    !installed -> MaterialTheme.colorScheme.onSurfaceVariant
+                    else -> MaterialTheme.colorScheme.onSurface
+                },
+                fontWeight = if (active) FontWeight.SemiBold
+                            else FontWeight.Normal,
+                // ⚠ weight(fill = false) is what keeps every gear THE SAME
+                // SIZE. Row does not wrap, it SQUEEZES, and with two chips
+                // across a phone the squeeze landed on whichever child had no
+                // weight -- the icon. So face_swapper and face_enhancer, which
+                // share a row, drew a visibly smaller gear than lip_syncer,
+                // which has its row to itself. A weighted child is measured
+                // with what is LEFT after the unweighted ones, so the label now
+                // absorbs the shortfall (it ellipsises) and the gear never
+                // changes size. fill = false so a short label still does not
+                // stretch the chip.
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            // Its own clickable inside the chip's, which Compose resolves to the
+            // innermost -- so the gear opens settings and does NOT also toggle
+            // the stage underneath it. 22 dp of touch target inside a 36 dp
+            // chip is below the 48 dp guideline, but a chip that grew to hold a
+            // 48 dp box would no longer fit two across a phone, which is the
+            // layout constraint this row is already built around.
+            if (installed && onSettings != null) {
+                HintIcon(stringResource(R.string.swap_proc_settings, name)) {
+                    Icon(
+                        Icons.Default.Settings,
+                        stringResource(R.string.swap_proc_settings, name),
+                        Modifier
+                            .size(18.dp)
+                            .clip(CircleShape)
+                            .clickable(enabled = enabled) { onSettings() }
+                            .alpha(if (enabled) 1f else 0.31f),
+                        tint = if (active) MaterialTheme.colorScheme.onBackground
+                               else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
     }
 }
 

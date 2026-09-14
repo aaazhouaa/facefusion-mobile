@@ -757,19 +757,15 @@ fun PreviewPane(
 }
 
 /**
- * A compact 72 dp tile for the workbench row — source face on the left, target on the
- * right.
+ * One input of the workbench row: an 80 x 80 dp content square with every action icon the
+ * tile owns laid out in a strip UNDER it. Source face, target and voice all share this
+ * form, and the three sit inside one bordered card (see SwapScreen).
  *
  * They used to be full-height panes; a portrait clip pushed them off the first screen and
- * the panes competed with the stage chips for what a fresh install sees. A tile keeps both
- * inputs permanently on screen: 72 dp tall whatever the state, width wrapping to whatever
- * the row gives it, the label as a translucent plate ON the picture so the whole height is
- * image, and the pick/remove actions tucked into the top corner.
- *
- * [fill] switches to the voice tile's layout: the tile stretches to whatever width the
- * caller gives it (a `weight`), its content centres in the whole surface, and the actions
- * float on the surface's own corners -- inside the element, the way every tile looked
- * before the compact form existed.
+ * the panes competed with the stage chips for what a fresh install sees. The square keeps
+ * both inputs permanently on screen whatever the state -- the bitmap with [faceBoxes] over
+ * it, or [actionIcon] plus [placeholder] while empty -- and the icons stay reachable in
+ * the strip below instead of floating on the picture.
  */
 @Composable
 fun FaceTile(
@@ -777,16 +773,14 @@ fun FaceTile(
     bitmap: Bitmap?,
     placeholder: String,
     modifier: Modifier = Modifier,
-    /** Makes the whole tile tappable — the target is picked by tapping its own frame. */
+    /** Makes the content square tappable — the target is picked by tapping its own frame. */
     onClick: (() -> Unit)? = null,
     /** Shown large and centred while [bitmap] is null, as the tile's call to action. */
     actionIcon: ImageVector? = null,
-    /** Small actions (camera, change, delete…) over the tile's top-right corner. */
+    /** Small actions (camera, change, delete…), in the strip under the content. */
     actions: @Composable () -> Unit = {},
-    /** Actions that keep the original bottom-right corner (the video camera). */
+    /** The second group of strip actions (the video camera, the face switch, delete). */
     bottomActions: @Composable () -> Unit = {},
-    /** Stretch to the caller's width; actions float on the surface (the voice tile). */
-    fill: Boolean = false,
     /**
      * Face boxes over the tile's image, in the BITMAP's own pixel coordinates: five
      * floats per face -- x0, y0, x1, y1, score -- exactly as `NativePipe.detectFaces`
@@ -801,41 +795,40 @@ fun FaceTile(
      * tile is the target picker first, a face picker second.
      */
     onPickFace: ((Float, Float) -> Unit)? = null,
-    /** Overlay pinned to the content area's BOTTOM-END corner, on top of the content
-     *  (the source tile's expand arrow, the voice tile's settings gear). */
+    /** The tile's picker trigger (the source tile's list glyph, the voice tile's gear),
+     *  in the strip under the content; it carries its own sheet. */
     footer: (@Composable () -> Unit)? = null,
+    /** Puts [footer] at the END of the strip instead of the start -- the target tile's
+     *  gear sits at the strip's right, where the source tile's list glyph sits left. */
+    footerTrailing: Boolean = false,
+    /**
+     * The one tile that stretches (the voice tile, when it carries a `weight`): its
+     * content fills the tile's width instead of staying a fixed 80 dp square, so a long
+     * voice name is not clipped by a square that is narrower than the surface.
+     */
+    stretch: Boolean = false,
 ) {
-    if (fill) {
-        // The voice tile: same bottom-pinned icon column as the compact tiles, but
-        // the content stretches to the row's leftover width instead of a fixed square.
-        FaceTileFilled(label, bitmap, placeholder, modifier, onClick, actionIcon,
-                       actions, bottomActions, footer)
-        return
-    }
-    // ONE element wraps everything: the 72 x 72 dp content square and, flush beside it,
-    // the small action icons. The icons live INSIDE the tile's rounded surface -- they
-    // never add to the content square's 72 dp.
-    Box(
-        modifier
+    Column(
+        modifier = modifier
             .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
-        contentAlignment = Alignment.Center,
+            .background(MaterialTheme.colorScheme.surface),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        // BOTTOM-aligned, not centred: with a single action icon (the source's camera,
-        // the filled tiles' delete) a mid-height icon reads as a floating stray; pinned
-        // to the bottom edge it reads as a corner button, which is where tile actions
-        // have always lived. Two icons keep their stack -- top one higher, bottom one
-        // still landing on the corner.
-        Row(verticalAlignment = Alignment.Bottom) {
+        Box(
+            Modifier
+                .height(80.dp)
+                .then(if (stretch) Modifier.fillMaxWidth() else Modifier.width(80.dp))
+                .clip(RoundedCornerShape(16.dp))
+                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+            contentAlignment = Alignment.Center,
+        ) {
             Box(
                 Modifier
-                    .size(72.dp)
-                    .clip(RoundedCornerShape(16.dp))
+                    .fillMaxSize()
                     .then(
                         // Face picking takes the tap FIRST, and only over the image
-                        // itself: the icon column beside the square keeps its own
-                        // buttons, and a tap that misses every box runs the tile's own
+                        // itself: a tap that misses every box runs the tile's own
                         // onClick -- the tile stays the target picker first.
                         if (bitmap != null && onPickFace != null) {
                             Modifier.pointerInput(onPickFace, faceBoxes, bitmap) {
@@ -872,12 +865,10 @@ fun FaceTile(
                     ),
                 contentAlignment = Alignment.Center,
             ) {
-                Box(Modifier.fillMaxSize()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 if (bitmap != null) {
-                    // FULL-BLEED, no inset: the bitmap covers the whole 72 dp square. The
-                    // square's own clip rounds the image, so there is no frame, no border
-                    // and no margin left around it -- the picture IS the content square.
+                    // FULL-BLEED, no inset: the bitmap covers the whole square. The
+                    // square's own clip rounds the image, so there is no frame and no
+                    // margin left around it -- the picture IS the content square.
                     val image = remember(bitmap) { bitmap.asImageBitmap() }
                     Image(
                         image, label,
@@ -917,101 +908,8 @@ fun FaceTile(
                         }
                     }
                 } else {
-                    // The add-state content fills the same 72 x 72 dp square, so empty and
-                    // filled tiles measure identically.
-                    Column(
-                        modifier = Modifier.size(72.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                    ) {
-                        if (actionIcon != null) {
-                            Icon(
-                                actionIcon, null,
-                                Modifier.size(26.dp),
-                                // Same brand-tinted call-to-action as the full panes use, scaled
-                                // down to fit the tile's smaller plate.
-                                tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
-                            )
-                        }
-                        Text(
-                            placeholder,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.padding(horizontal = 6.dp),
-                        )
-                    }
-                }
-                }
-                Box(Modifier.align(Alignment.BottomEnd)) { footer?.invoke() }
-                }
-            }
-            // Small actions (camera, change, delete…), stacked in a column flush
-            // against the content square, inside the same tile surface and
-            // pinned to its bottom edge with the Row above.
-            Column(
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                actions()
-                bottomActions()
-            }
-        }
-    }
-}
-
-/**
- * The voice tile's stretched form as a private helper: ONE surface that stretches to
- * the width the caller hands it (a `weight`), content centred in the whole element,
- * and the small actions in the same bottom-pinned icon column the compact tiles use --
- * flush against the content, inside the same surface.
- *
- * `label` is kept for the content description only; it is no longer drawn on the
- * tile. The square/compact tiles do NOT use this form -- they keep the 72 dp content
- * square with the icon column beside it.
- */
-@Composable
-private fun FaceTileFilled(
-    label: String,
-    bitmap: Bitmap?,
-    placeholder: String,
-    modifier: Modifier = Modifier,
-    onClick: (() -> Unit)? = null,
-    actionIcon: ImageVector? = null,
-    actions: @Composable () -> Unit = {},
-    bottomActions: @Composable () -> Unit = {},
-    footer: (@Composable () -> Unit)? = null,
-) {
-    Box(
-        modifier
-            .height(72.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surface)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
-        contentAlignment = Alignment.Center,
-    ) {
-        // The voice tile lays its icons out exactly like the compact tiles: a
-        // bottom-pinned column flush against the content, inside the same
-        // surface. Only the content itself stretches to the row's leftover width.
-        Row(verticalAlignment = Alignment.Bottom) {
-            // The content gets its own box so the footer can pin to the CONTENT area's
-            // bottom-end corner -- the tile's right edge is the icon column, and a sheet
-            // anchor landing there would open over the mic and delete.
-            Box(
-                Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-            ) {
-                if (bitmap != null) {
-                    val image = remember(bitmap) { bitmap.asImageBitmap() }
-                    Image(
-                        image, label,
-                        Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(16.dp)),
-                        contentScale = ContentScale.Crop,
-                    )
-                } else {
+                    // The add-state content fills the same square, so empty and filled
+                    // tiles measure identically.
                     Column(
                         modifier = Modifier.fillMaxSize(),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1021,6 +919,8 @@ private fun FaceTileFilled(
                             Icon(
                                 actionIcon, null,
                                 Modifier.size(26.dp),
+                                // Same brand-tinted call-to-action as the full panes use,
+                                // scaled down to fit the tile's smaller plate.
                                 tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.75f),
                             )
                         }
@@ -1028,27 +928,28 @@ private fun FaceTileFilled(
                             placeholder,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
+                            // The stretched (voice) tile carries a file name, which is long:
+                            // it wraps to a second line rather than being cut to one.
+                            maxLines = if (stretch) 2 else 1,
                             overflow = TextOverflow.Ellipsis,
+                            textAlign = TextAlign.Center,
                             modifier = Modifier.padding(horizontal = 6.dp),
                         )
                     }
                 }
-                // Same bottom-end overlay seat as the compact tiles' footer (the source
-                // tile's expand arrow): drawn ON TOP of the content.
-                if (footer != null) {
-                    Box(Modifier.align(Alignment.BottomEnd)) { footer() }
-                }
             }
-            // Small actions (record, delete…), stacked in a column flush against the
-            // content and pinned to the tile's bottom edge -- the same
-            // icon column the source and target tiles use.
-            Column(
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                actions()
-                bottomActions()
-            }
+        }
+        // Every icon the tile owns, in one strip under the content. The picker trigger
+        // leads by default (the source's list glyph); [footerTrailing] moves it to the
+        // end instead (the target's gear, at the strip's right).
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (footer != null && !footerTrailing) footer()
+            actions()
+            bottomActions()
+            if (footer != null && footerTrailing) footer()
         }
     }
 }
