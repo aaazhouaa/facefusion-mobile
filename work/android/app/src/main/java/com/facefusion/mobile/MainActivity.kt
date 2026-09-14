@@ -2321,9 +2321,18 @@ class MainActivity : ComponentActivity() {
      * sits below the panes, it is one line among several, and on a save the user is usually
      * looking at the pane they just saved rather than at it. A toast says the thing landed
      * without the user having to go looking for the sentence that says so.
+     *
+     * ONE instance, reused. `makeText().show()` builds a fresh Toast per call and the
+     * system queues them -- tapping a permission-gated control repeatedly played the
+     * denial back once per tap, minutes of it. Re-setting the text and showing the same
+     * instance RESTARTS it instead, so a burst of taps costs one toast.
      */
+    private var toastInstance: android.widget.Toast? = null
     private fun toast(text: String) {
-        android.widget.Toast.makeText(this, text, android.widget.Toast.LENGTH_SHORT).show()
+        val t = toastInstance ?: android.widget.Toast.makeText(
+            this, text, android.widget.Toast.LENGTH_SHORT).also { toastInstance = it }
+        t.setText(text)
+        t.show()
     }
 
     /**
