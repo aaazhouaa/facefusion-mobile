@@ -142,7 +142,11 @@ fun AppScaffold(
                     Box(
                         Modifier
                             .size(28.dp)
-                            .clip(CircleShape),
+                            .clip(CircleShape)
+                            // Click stays on the 28 dp BOX, not the 18 dp glyph: the
+                            // comment above is about this row's tuned height, and a tap
+                            // that lands on the box but misses the glyph still toggles.
+                            .clickable { onToggleTheme(!isDark) },
                         contentAlignment = Alignment.Center,
                     ) {
                         HintIcon(stringResource(R.string.topbar_toggle_theme)) {
@@ -152,10 +156,7 @@ fun AppScaffold(
                                     else R.drawable.ic_theme_moon
                                 ),
                                 contentDescription = stringResource(R.string.topbar_toggle_theme),
-                                modifier = Modifier
-                                    .size(18.dp)
-                                    .clip(CircleShape)
-                                    .clickable { onToggleTheme(!isDark) },
+                                modifier = Modifier.size(18.dp),
                                 tint = MaterialTheme.colorScheme.onBackground.copy(alpha = brandAlpha),
                             )
                         }

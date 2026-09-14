@@ -51,6 +51,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.launch
 import com.facefusion.mobile.R
 import kotlinx.coroutines.delay
 import java.io.File
@@ -131,15 +132,18 @@ val IconDownload: ImageVector = ImageVector.Builder(
  * over the glyph with its [label] (the same string the content description carries);
  * release and it is gone.
  *
- * Wraps any painter/vector icon: the icon composable is passed as [content] so the
- * caller's size, tint and modifiers are untouched, and only the pointer handling is
- * added here. The bubble is a plain Box -- not a material3 tooltip, which steals a
- * minimum 40 dp touch footprint the row's tight trigger heads cannot spare.
+ * ⚠ The gesture is a PASSIVE OBSERVER until the long-press timeout fires. This box sits
+ * INSIDE the icon's clickable (an IconButton, a chip's own clickable…), and Compose
+ * dispatches the Main pass from the deepest node outward -- so anything consumed here
+ * would be consumed BEFORE the clickable sees it, and a detectTapGestures (which
+ * consumes the up even with no onTap) would swallow every click. Hence the hand-rolled
+ * loop: nothing is consumed while the finger is down short of the timeout, so taps fall
+ * through untouched; past the timeout the hint shows and everything is consumed, so the
+ * release never reaches the clickable and the action does not fire on a long-press
+ * that only meant to read the label.
  *
- * The gesture must not swallow taps: [detectTapGestures] with only onLongPress leaves
- * onTap unconsumed, so a clickable placed UNDER this (or under the content's own
- * clickable) keeps working. Long-press alone is detected here; on release the flag
- * clears and the bubble disappears.
+ * The bubble is a plain Box -- not a material3 tooltip, which steals a minimum 40 dp
+ * touch footprint the row's tight trigger heads cannot spare.
  */
 @Composable
 fun HintIcon(
@@ -152,10 +156,37 @@ fun HintIcon(
         Box(
             Modifier
                 .pointerInput(label) {
-                    detectTapGestures(
-                        onLongPress = { showHint = true },
-                        onPress = { tryAwaitRelease(); showHint = false },
-                    )
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        // The wait for the long-press timeout. A stationary finger emits
+                        // no events, so "wait N ms OR until an event arrives" is exactly
+                        // AwaitPointerEventScope.withTimeout: it returns the timeout
+                        // result (null here) or, when an event arrives first, hands back
+                        // that event. A plain coroutine delay() cannot be used -- this
+                        // scope is @RestrictsSuspension, no child jobs.
+                        val first = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                            awaitPointerEvent()
+                        }
+                        if (first == null) {
+                            // The finger held still past the timeout: the hint shows. From
+                            // here on the pointer is CONSUMED so the release never reaches
+                            // the clickable underneath and the action does not fire -- the
+                            // press meant "what is this?", not "do it".
+                            showHint = true
+                            var done = false
+                            while (!done) {
+                                val event = awaitPointerEvent()
+                                event.changes.forEach { it.consume() }
+                                done = event.changes.any { !it.pressed }
+                            }
+                            showHint = false
+                        }
+                        // first != null: an event arrived INSIDE the timeout -- a tap, a
+                        // drag, a scroll. Nothing was consumed and this handler returns
+                        // immediately, so the press flows to the clickable underneath
+                        // untouched. That is the whole contract: taps pass through, only
+                        // a held-press turns into a hint.
+                    }
                 },
             contentAlignment = Alignment.Center,
         ) {
