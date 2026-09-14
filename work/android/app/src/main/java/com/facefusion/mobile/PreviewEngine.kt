@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.math.roundToInt
 
 /**
@@ -183,6 +185,29 @@ class PreviewEngine {
             }.getOrNull()
         }
         bmp?.let { capped(it) }
+    }
+
+    /**
+     * The frame NEAR [timeMs], fetched the fast way: the retriever's time-based seek,
+     * with no exact-frame contract.
+     *
+     * This is the scrub path only. [frameAt] exists because `OPTION_CLOSEST` is a REQUEST
+     * -- on sparse-keyframe footage it snaps to the keyframe behind the mark and returns
+     * the same image for every position inside a GOP -- so a preview settled on this
+     * would disagree with the run. But a drag does not need exact: it needs SOMETHING
+     * recent under the moving handle in tens of milliseconds instead of a keyframe
+     * interval of decode, and the settle path ([frameAt]) replaces the approximation
+     * with the exact frame once the handle stops.
+     */
+    suspend fun frameFast(timeMs: Float): Bitmap? = withContext(Dispatchers.IO) {
+        synchronized(mmrLock) {
+            val r = mmr ?: return@synchronized null
+            val bmp = runCatching {
+                r.getFrameAtTime((timeMs * 1000).toLong(),
+                                 MediaMetadataRetriever.OPTION_CLOSEST)
+            }.getOrNull()
+            bmp?.let { capped(it) }
+        }
     }
 
     /**
@@ -420,7 +445,8 @@ class PreviewEngine {
      * kind of silent wrongness this preview exists to catch -- hence [Swapped.faces].
      */
     suspend fun swap(frame: Bitmap, timeMs: Float = 0f, voicePath: String? = null):
-            Swapped = withContext(Dispatchers.Default) {
+            Swapped = swapMutex.withLock {
+        withContext(Dispatchers.Default) {
         if (!isWarm) return@withContext Swapped(null, 0, "Pipeline is not loaded")
         runCatching {
             val soft = frame.copy(Bitmap.Config.ARGB_8888, false)
@@ -444,7 +470,15 @@ class PreviewEngine {
             val out = NativePipe.bgrToArgb(bgr, w, h, w, h)
             Swapped(Bitmap.createBitmap(out, w, h, Bitmap.Config.ARGB_8888), faces)
         }.getOrElse { Swapped(null, 0, it.message ?: "preview failed") }
+        }
     }
+
+    /**
+     * One frame in the pipeline at a time. The drag preview added a second [swap] caller
+     * alongside the settle refresh: without this, two `processFrameAt` calls could
+     * interleave inside the shared native pipeline -- detect on frame A, swap on frame B.
+     */
+    private val swapMutex = Mutex()
 
     /** Tear everything down. Safe to call repeatedly. */
     fun release() {
@@ -453,6 +487,15 @@ class PreviewEngine {
     }
 
     private companion object {
-        const val MAX_EDGE = 1920
+        /**
+         * Preview frame cap, long edge.
+         *
+         * The result pane draws at displayThumb's 720 and the swapper's cost scales with
+         * frame area, so 1920 paid ~7x the pixels the pane can show. 960 keeps every
+         * consumer of the frame (face-box overlay, tap-to-pick, per-person thumbs) on the
+         * SAME bitmap they measure, and leaves the real output untouched -- runs decode
+         * through VideoSwapper at their own output size.
+         */
+        const val MAX_EDGE = 960
     }
 }

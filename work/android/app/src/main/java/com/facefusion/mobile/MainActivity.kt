@@ -23,6 +23,7 @@ import com.facefusion.mobile.ui.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -577,6 +578,22 @@ class MainActivity : ComponentActivity() {
     private val previewAtMs: Float
         get() = if (previewEdge == TrimEdge.End) trimEndMs else trimStartMs
     private var scrubJob: Job? = null
+
+    /**
+     * The drag-throttled instant preview: while the handle MOVES, [onTrimChanged] fires
+     * per pixel and each fire asks [PreviewEngine.frameFast] for a NEAR frame, swaps it
+     * and shows it. Approximate by design -- exactness is the settle path's job below.
+     * Rate-limited to about 2 swaps a second; a faster cadence just queues inference
+     * behind itself and the pane falls further behind the finger than no preview at all.
+     */
+    private var scrubPreviewJob: Job? = null
+
+    /**
+     * A trim seek is resolving (debounce + frame decode). Drives the swapped pane's
+     * spinner: the swap itself only runs after the frame is decoded, so without this the
+     * pane sits silent on the old image for the whole seek and the drag reads as ignored.
+     */
+    private var seekBusy by mutableStateOf(false)
 
     /** The debounced redraw owned by [previewOptionsChanged]. One at a time. */
     private var refreshJob: Job? = null
@@ -1682,7 +1699,7 @@ class MainActivity : ComponentActivity() {
                                                     ?: preview?.takeIf { previewOwner == targetVersion }),
                                     timeLabel = if (durationMs > 0) fmt(previewAtMs) else "",
                                     warm = previewWarm,
-                                    busy = previewBusy,
+                                    busy = previewBusy || seekBusy,
                                     note = previewNote,
                                     faceBoxes = if (showFaceBoxes) faceBoxes else null,
                                     referenceBox = if (showFaceBoxes) referenceBox else null,
@@ -2627,20 +2644,56 @@ class MainActivity : ComponentActivity() {
         trimStartMs = start
         trimEndMs = end
         previewEdge = edge
+        // The drag preview: a fast approximate swap under the moving handle. Skipped when
+        // the pipeline is not already warm -- the settle path's exact refresh pays for a
+        // cold pipeline anyway, and a half-loaded one cannot serve an extra frame.
+        if (previewWarm && !busy) {
+            scrubPreviewJob?.cancel()
+            scrubPreviewJob = lifecycleScope.launch {
+                delay(80)
+                val fast = previews.frameFast(previewAtMs) ?: return@launch
+                // Same gate the settle path applies: the pane must never show a frame the
+                // run would refuse to process. A refusal here just skips the instant
+                // preview; the settle path reports the full message.
+                ContentGate.checkImage(fast).let { v -> if (!v.ok) return@launch }
+                val out = previews.swap(fast, previewAtMs, voiceFile?.absolutePath)
+                // A settled seek may have finished while this ran. Only show what is
+                // still current, and leave [originalFrame] alone: the exact decode owns
+                // it, and an approximate bitmap must never become the preview's input
+                // of record (Save writes from the exact frame).
+                if (isActive) {
+                    if (out.error == null && out.faces > 0) {
+                        swappedFrame = out.bitmap
+                        swappedFrameOwner = targetVersion
+                        previewNote = null
+                    } else if (out.faces == 0) {
+                        previewNote = getString(R.string.status_no_face)
+                    }
+                }
+            }
+        }
         scrubJob?.cancel()
         scrubJob = lifecycleScope.launch {
-            delay(150)
-            // The frame under the handle being dragged, not always the start.
-            android.util.Log.d("ffpreview", "seek to " + previewAtMs + " edge=" + edge)
-            val got = previews.frameAt(previewAtMs)
-            // Size only. The pixel sampling that lived here is what proved the retriever was
-            // returning identical images for different timestamps (see FrameSeeker); it did
-            // its job and does not belong in a shipping build.
-            android.util.Log.d("ffpreview", "  frame=" +
-                (if (got == null) "NULL" else got.width.toString() + "x" + got.height))
-            originalFrame = got
+            seekBusy = true
+            try {
+                delay(150)
+                // The frame under the handle being dragged, not always the start.
+                android.util.Log.d("ffpreview", "seek to " + previewAtMs + " edge=" + edge)
+                val got = previews.frameAt(previewAtMs)
+                // Size only. The pixel sampling that lived here is what proved the retriever was
+                // returning identical images for different timestamps (see FrameSeeker); it did
+                // its job and does not belong in a shipping build.
+                android.util.Log.d("ffpreview", "  frame=" +
+                    (if (got == null) "NULL" else got.width.toString() + "x" + got.height))
+                originalFrame = got
+            } finally {
+                seekBusy = false
+            }
+            // No further debounce here: a job started later cancels this one wholesale, so
+            // the 250 ms that used to follow the decode was a serial 250 ms on EVERY settled
+            // drag with no deduplication of its own. The swap only refreshes when warm, and
+            // when two frames decode back to back the pipeline coalesces via refreshPending.
             if (previewWarm && !busy) {
-                delay(250)
                 refreshSwapped(force = false)
             }
         }
