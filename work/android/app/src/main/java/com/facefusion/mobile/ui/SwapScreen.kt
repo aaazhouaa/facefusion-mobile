@@ -19,6 +19,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.PlayArrow
@@ -49,6 +50,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
@@ -402,7 +404,13 @@ fun SwapScreen(
     // The voice playback and clip/trim controls fold under their own card, below the
     // processors, same default CLOSED: the voice only matters once Lip Sync is on and a
     // clip is loaded, and a standing playback row pushed the inputs further down.
-    var voiceSettingsExpanded by rememberSaveable { mutableStateOf(false) }
+    var voiceSettingsMenuExpanded by rememberSaveable { mutableStateOf(false) }
+    // The settings gear's absolute window position and height, measured on layout: the
+    // popup is a sibling anchored to the gear's Box, but the gear is not where the source
+    // tile's arrow is -- it sits at the far right of a weighted row, so a hard-coded
+    // dx/dy cannot place the sheet. Measuring sidesteps that.
+    var voiceGearPos by remember { mutableStateOf(Offset.Zero) }
+    var voiceGearH by remember { mutableIntStateOf(0) }
     // The log panel folds under its caption. Default CLOSED -- it is a debug readout,
     // and a standing 170 dp panel below the buttons made the page longer than it needed
     // to be on every screen, not just while something was running.
@@ -627,122 +635,6 @@ fun SwapScreen(
                     )
                 }
                 }
-            }
-        }
-
-        // The processors' knobs used to sit inline here, each under the chip that turns it
-        // on. They are behind that chip's own GEAR now: with three processors the inline
-        // form pushed the source and target panes off the first screen whenever two stages
-        // were enabled, and the panes are the primary path. They did not move far: one tap,
-        // on the chip they already belong to, instead of a scroll down to Advanced.
-        //
-        // Each still reads and writes the SAME `opts` field it always did, so nothing about
-        // the native side changed -- only where the control is drawn.
-
-        // Only while Lip Sync is ON. It is a
-        // REQUIRED input, not a tuning knob, so it sits in the workbench row between
-        // source and target rather than in Advanced: the Swap button stays disabled
-        // without one (see its `enabled` below), because syncing a clip to the audio it
-        // already has has nothing to fix -- upstream's lip syncer exists to dub a
-        // DIFFERENT voice on, and running it on the target's own track can only cost
-        // face quality with no corrective benefit.
-
-// ---------------------------------------------------------------- voice: listen, trim
-        //
-        // A voice is invisible, so the only way to check what was picked is to hear it.
-        // Play previews exactly the trimmed selection -- it starts at the trim start and
-        // stops at the trim end -- while the seekbar can scrub anywhere in the file. The
-        // range slider below chooses the part that actually DRIVES the lips, and it is the
-        // same two-handle control the video gets, because it is the same decision: keep
-        // only the part that matters.
-        if (opts.lipSync && hasVoice && voiceDurationMs > 0) {
-            SectionCard(
-                stringResource(R.string.swap_voice_settings),
-                collapsible = true,
-                expanded = voiceSettingsExpanded,
-                onToggle = { voiceSettingsExpanded = !voiceSettingsExpanded },
-            ) {
-                // The playback and trim sliders read too high-contrast against the theme,
-                // so every part (thumb, active and inactive track) has its opacity cut by
-                // 31%: 69% alpha keeps the same hue with a much softer contrast -- the
-                // same treatment the output and trim sliders already use.
-                val voiceSliderColors = SliderDefaults.colors(
-                    thumbColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
-                    activeTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
-                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.69f),
-                )
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onVoicePlayPause, enabled = idle, modifier = Modifier.size(36.dp)) {
-                        // 31% dim when idle, like every other disabled icon on this
-                        // screen; the drawn pause bars share it.
-                        val voiceTint = MaterialTheme.colorScheme.onSurfaceVariant
-                            .copy(alpha = if (idle) 1f else 0.31f)
-                        HintIcon(stringResource(if (voicePlaying) R.string.out_pause
-                                                else R.string.swap_voice_play)) {
-                            if (voicePlaying) {
-                                // Two bars, drawn rather than an icon: the icons artifact this app
-                                // carries (material3's transitive icons-core) has PlayArrow but no
-                                // Pause, and extended-icons is a heavy addition for one glyph.
-                                val pauseTint = voiceTint
-                                Canvas(Modifier.size(16.dp)) {
-                                    val bar = 4.dp.toPx()
-                                    val gap = 3.dp.toPx()
-                                    val top = 0.dp.toPx()
-                                    val bottom = size.height
-                                    drawRoundRect(
-                                        color = pauseTint,
-                                        topLeft = Offset(0f, top),
-                                        size = Size(bar, bottom - top),
-                                        cornerRadius = CornerRadius(1.dp.toPx()),
-                                    )
-                                    drawRoundRect(
-                                        color = pauseTint,
-                                        topLeft = Offset(bar + gap, top),
-                                        size = Size(bar, bottom - top),
-                                        cornerRadius = CornerRadius(1.dp.toPx()),
-                                    )
-                                }
-                            } else {
-                                Icon(Icons.Default.PlayArrow,
-                                     stringResource(R.string.swap_voice_play),
-                                     Modifier.size(20.dp),
-                                     tint = voiceTint)
-                            }
-                        }
-                    }
-                    Slider(
-                        value = voicePosMs.coerceIn(0f, voiceDurationMs.toFloat()),
-                        onValueChange = onVoiceSeek,
-                        valueRange = 0f..voiceDurationMs.toFloat(),
-                        enabled = idle,
-                        modifier = Modifier.weight(1f),
-                        colors = voiceSliderColors,
-                    )
-                    Text("${fmt(voicePosMs)} / ${fmt(voiceDurationMs.toFloat())}",
-                         style = MaterialTheme.typography.bodySmall,
-                         fontFamily = FontFamily.Monospace,
-                         modifier = Modifier.padding(start = 8.dp))
-                }
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Caption(stringResource(R.string.swap_voice_trim), Modifier.weight(1f))
-                    Text("${fmt(voiceTrimStartMs)} – ${fmt(voiceTrimEndMs)}",
-                         style = MaterialTheme.typography.bodySmall,
-                         fontFamily = FontFamily.Monospace)
-                }
-                RangeSlider(
-                    value = voiceTrimStartMs..voiceTrimEndMs,
-                    onValueChange = { r ->
-                        // The same minimum span as the video trim, for the same reason: the
-                        // mouth needs a mel window, the encoder needs a frame.
-                        onVoiceTrimChange(r.start, maxOf(r.endInclusive, r.start + 333f))
-                    },
-                    valueRange = 0f..voiceDurationMs.toFloat(),
-                    enabled = idle,
-                    colors = voiceSliderColors,
-                )
-                Text(stringResource(R.string.swap_voice_trim_hint),
-                     style = MaterialTheme.typography.bodySmall,
-                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
@@ -1128,6 +1020,161 @@ fun SwapScreen(
                             }
                         }
                     },
+                    // 语音设置入口：叠加在瓦片左下角、内容上层（同「选择源人脸」
+                    // 箭头的 footer 座位）。16 dp 净显示、标准图标色；有语音才存在——
+                    // 空瓦片没有可设置的东西，整个图标隐藏而非变灰。
+                    // 弹层也声明在这里：Popup 锚定其声明所在的布局节点，只有放在
+                    // 齿轮旁边才能出现在齿轮正下方（放在页面级会锚到页顶）。
+                    footer = if (opts.lipSync && hasVoice) {
+                        {
+                            Box {
+                                HintIcon(
+                                    stringResource(R.string.swap_voice_settings),
+                                    Modifier.onGloballyPositioned {
+                                        voiceGearPos = it.positionInWindow()
+                                        voiceGearH = it.size.height
+                                    },
+                                ) {
+                                    Icon(
+                                        Icons.Default.Settings,
+                                        stringResource(R.string.swap_voice_settings),
+                                        Modifier
+                                            .size(28.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable { voiceSettingsMenuExpanded = true }
+                                            .padding(6.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                if (voiceSettingsMenuExpanded && voiceGearH > 0) {
+                                    // The same sheet the source tile's arrow raises -- same
+                                    // width, shape and contents. Only the placement differs,
+                                    // because this gear is not where that arrow is: the arrow
+                                    // opens the FIRST tile of the row (its box hugs the row's
+                                    // left edge), the gear sits at the far right of a
+                                    // weighted row. So instead of the arrow's hard-coded
+                                    // dx/dy, measure the gear and solve for the two rules
+                                    // that must hold: the sheet is centred on the SCREEN,
+                                    // and it hangs just under the tile the gear belongs to.
+                                    val density = LocalDensity.current
+                                    val sheetW = with(density) {
+                                        inputRowW.toDp().takeIf { inputRowW > 0 } ?: Dp.Unspecified
+                                    }
+                                    val sheetShape = RoundedCornerShape(20.dp)
+                                    // TopStart anchors the sheet's LEFT edge to the
+                                    // gear's left edge, so dx is "screen-centre minus
+                                    // sheet-centre, measured from the gear".
+                                    val dx = ((with(density) { screenW.dp.toPx() } - inputRowW) / 2f -
+                                              voiceGearPos.x).roundToInt()
+                                    // The offset is already relative to the anchor, and
+                                    // the anchor's top IS the gear's top, so dropping by
+                                    // the gear's own height lands the sheet's top edge on
+                                    // the tile's bottom edge; 3 dp clears it.
+                                    val dy = voiceGearH + with(density) { 3.dp.roundToPx() }
+                                    Popup(
+                                        alignment = Alignment.TopStart,
+                                        offset = IntOffset(dx, dy),
+                                        onDismissRequest = { voiceSettingsMenuExpanded = false },
+                                        properties = PopupProperties(focusable = true),
+                                    ) {
+                                        Column(
+                                            Modifier
+                                                .width(sheetW)
+                                                .shadow(12.dp, sheetShape)
+                                                .clip(sheetShape)
+                                                .background(MaterialTheme.colorScheme.surface)
+                                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant,
+                                                        sheetShape)
+                                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                                        ) {
+                                            // The playback and trim sliders read too high-contrast against the theme,
+                                            // so every part (thumb, active and inactive track) has its opacity cut by
+                                            // 31%: 69% alpha keeps the same hue with a much softer contrast -- the
+                                            // same treatment the output and trim sliders already use.
+                                            val voiceSliderColors = SliderDefaults.colors(
+                                                thumbColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
+                                                activeTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
+                                                inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.69f),
+                                            )
+                                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                                IconButton(onVoicePlayPause, enabled = idle, modifier = Modifier.size(36.dp)) {
+                                                    // 31% dim when idle, like every other disabled icon on this
+                                                    // screen; the drawn pause bars share it.
+                                                    val voiceTint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        .copy(alpha = if (idle) 1f else 0.31f)
+                                                    HintIcon(stringResource(if (voicePlaying) R.string.out_pause
+                                                                            else R.string.swap_voice_play)) {
+                                                        if (voicePlaying) {
+                                                            // Two bars, drawn rather than an icon: the icons artifact this app
+                                                            // carries (material3's transitive icons-core) has PlayArrow but no
+                                                            // Pause, and extended-icons is a heavy addition for one glyph.
+                                                            val pauseTint = voiceTint
+                                                            Canvas(Modifier.size(16.dp)) {
+                                                                val bar = 4.dp.toPx()
+                                                                val gap = 3.dp.toPx()
+                                                                val top = 0.dp.toPx()
+                                                                val bottom = size.height
+                                                                drawRoundRect(
+                                                                    color = pauseTint,
+                                                                    topLeft = Offset(0f, top),
+                                                                    size = Size(bar, bottom - top),
+                                                                    cornerRadius = CornerRadius(1.dp.toPx()),
+                                                                )
+                                                                drawRoundRect(
+                                                                    color = pauseTint,
+                                                                    topLeft = Offset(bar + gap, top),
+                                                                    size = Size(bar, bottom - top),
+                                                                    cornerRadius = CornerRadius(1.dp.toPx()),
+                                                                )
+                                                            }
+                                                        } else {
+                                                            Icon(Icons.Default.PlayArrow,
+                                                                 stringResource(R.string.swap_voice_play),
+                                                                 Modifier.size(20.dp),
+                                                                 tint = voiceTint)
+                                                        }
+                                                    }
+                                                }
+                                                Slider(
+                                                    value = voicePosMs.coerceIn(0f, voiceDurationMs.toFloat()),
+                                                    onValueChange = onVoiceSeek,
+                                                    valueRange = 0f..voiceDurationMs.toFloat(),
+                                                    enabled = idle,
+                                                    modifier = Modifier.weight(1f),
+                                                    colors = voiceSliderColors,
+                                                )
+                                                Text("${fmt(voicePosMs)} / ${fmt(voiceDurationMs.toFloat())}",
+                                                     style = MaterialTheme.typography.bodySmall,
+                                                     fontFamily = FontFamily.Monospace,
+                                                     modifier = Modifier.padding(start = 8.dp))
+                                            }
+                                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                                Caption(stringResource(R.string.swap_voice_trim), Modifier.weight(1f))
+                                                Text("${fmt(voiceTrimStartMs)} – ${fmt(voiceTrimEndMs)}",
+                                                     style = MaterialTheme.typography.bodySmall,
+                                                     fontFamily = FontFamily.Monospace)
+                                            }
+                                            RangeSlider(
+                                                value = voiceTrimStartMs..voiceTrimEndMs,
+                                                onValueChange = { r ->
+                                                    // The same minimum span as the video trim, for the same reason: the
+                                                    // mouth needs a mel window, the encoder needs a frame.
+                                                    onVoiceTrimChange(r.start, maxOf(r.endInclusive, r.start + 333f))
+                                                },
+                                                valueRange = 0f..voiceDurationMs.toFloat(),
+                                                enabled = idle,
+                                                colors = voiceSliderColors,
+                                            )
+                                            Text(stringResource(R.string.swap_voice_trim_hint),
+                                                 style = MaterialTheme.typography.bodySmall,
+                                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else null,
                 )
             }
 

@@ -51,6 +51,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import kotlinx.coroutines.launch
 import com.facefusion.mobile.R
 import kotlinx.coroutines.delay
@@ -158,19 +159,36 @@ fun HintIcon(
                 .pointerInput(label) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        // The wait for the long-press timeout. A stationary finger emits
-                        // no events, so "wait N ms OR until an event arrives" is exactly
-                        // AwaitPointerEventScope.withTimeout: it returns the timeout
-                        // result (null here) or, when an event arrives first, hands back
-                        // that event. A plain coroutine delay() cannot be used -- this
-                        // scope is @RestrictsSuspension, no child jobs.
-                        val first = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
-                            awaitPointerEvent()
+                        val slop = viewConfiguration.touchSlop
+                        // The wait for the long-press timeout, tolerant of finger noise.
+                        // A held finger is never perfectly still: every ~50 ms it emits a
+                        // move of a fraction of a dp. A bare withTimeoutOrNull would take
+                        // the FIRST of those as "an event arrived" and bail, so the hint
+                        // would almost never fire on a real device. Instead: keep waiting
+                        // across the timeout window, and only treat the press as over
+                        // when it lifts, someone else consumes it (a scroll), or the
+                        // finger travels past the touch slop -- a real drag.
+                        var hintShown = false
+                        var abandoned = false
+                        while (!hintShown && !abandoned) {
+                            val event = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                                awaitPointerEvent()
+                            }
+                            if (event == null) {
+                                hintShown = true
+                            } else {
+                                val change = event.changes.firstOrNull { it.id == down.id }
+                                abandoned = change == null ||
+                                        !change.pressed ||
+                                        event.changes.any { it.isConsumed } ||
+                                        (change.positionChange().getDistance() > slop &&
+                                         !change.isConsumed)
+                            }
                         }
-                        if (first == null) {
-                            // The finger held still past the timeout: the hint shows. From
-                            // here on the pointer is CONSUMED so the release never reaches
-                            // the clickable underneath and the action does not fire -- the
+                        if (hintShown) {
+                            // Held past the timeout: the hint shows. From here on the
+                            // pointer is CONSUMED so the release never reaches the
+                            // clickable underneath and the action does not fire -- the
                             // press meant "what is this?", not "do it".
                             showHint = true
                             var done = false
@@ -181,11 +199,10 @@ fun HintIcon(
                             }
                             showHint = false
                         }
-                        // first != null: an event arrived INSIDE the timeout -- a tap, a
-                        // drag, a scroll. Nothing was consumed and this handler returns
-                        // immediately, so the press flows to the clickable underneath
-                        // untouched. That is the whole contract: taps pass through, only
-                        // a held-press turns into a hint.
+                        // !hintShown: a tap, a drag or a scroll. Nothing was consumed and
+                        // this handler returns immediately, so the press flows to the
+                        // clickable underneath untouched. That is the whole contract:
+                        // taps pass through, only a held-press turns into a hint.
                     }
                 },
             contentAlignment = Alignment.Center,
@@ -784,13 +801,15 @@ fun FaceTile(
      * tile is the target picker first, a face picker second.
      */
     onPickFace: ((Float, Float) -> Unit)? = null,
+    /** Overlay pinned to the tile's BOTTOM-START corner, on top of the content
+     *  (the source tile's expand arrow, the voice tile's settings gear). */
     footer: (@Composable () -> Unit)? = null,
 ) {
     if (fill) {
         // The voice tile: same bottom-pinned icon column as the compact tiles, but
         // the content stretches to the row's leftover width instead of a fixed square.
         FaceTileFilled(label, bitmap, placeholder, modifier, onClick, actionIcon,
-                       actions, bottomActions)
+                       actions, bottomActions, footer)
         return
     }
     // ONE element wraps everything: the 72 x 72 dp content square and, flush beside it,
@@ -961,6 +980,7 @@ private fun FaceTileFilled(
     actionIcon: ImageVector? = null,
     actions: @Composable () -> Unit = {},
     bottomActions: @Composable () -> Unit = {},
+    footer: (@Composable () -> Unit)? = null,
 ) {
     Box(
         modifier
@@ -1018,6 +1038,11 @@ private fun FaceTileFilled(
                 actions()
                 bottomActions()
             }
+        }
+        // Same bottom-start overlay seat as the compact tiles' footer (the source
+        // tile's expand arrow): drawn ON TOP of the content, inside the tile surface.
+        if (footer != null) {
+            Box(Modifier.align(Alignment.BottomStart)) { footer() }
         }
     }
 }
