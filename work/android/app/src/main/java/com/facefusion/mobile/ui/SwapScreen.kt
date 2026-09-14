@@ -1256,34 +1256,18 @@ fun SwapScreen(
                             .padding(4.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    // 自动保存开关。
-                    Row(
+                    // 自动保存开关：Save 图标，启用时主题色（深），未启用时浅灰。
+                    Icon(
+                        painterResource(R.drawable.ic_save),
+                        stringResource(R.string.batch_autosave),
                         Modifier
-                            .clip(RoundedCornerShape(8.dp))
+                            .size(16.dp)
+                            .clip(RoundedCornerShape(4.dp))
                             .clickable(enabled = idle) { onBatchAutoSave(!batchAutoSave) }
-                            .padding(horizontal = 4.dp, vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(
-                            Modifier
-                                .size(16.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (batchAutoSave) MaterialTheme.colorScheme.primary.copy(alpha = 0.69f)
-                                    else MaterialTheme.colorScheme.outlineVariant
-                                ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (batchAutoSave) {
-                                Icon(Icons.Default.Check, null, Modifier.size(11.dp),
-                                     tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.69f))
-                            }
-                        }
-                        Spacer(Modifier.width(4.dp))
-                        Text(stringResource(R.string.batch_autosave),
-                             style = MaterialTheme.typography.bodySmall,
-                             fontSize = 11.sp)
-                    }
+                            .padding(1.dp),
+                        tint = if (batchAutoSave) MaterialTheme.colorScheme.primary
+                               else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+                    )
                     // 清空全部。16dp 图标；队列空时不透明度降到 31%，读作"没有可清的
                     // 东西"，但仍占着位置。跑批中同样 31%：图标已被禁用，全亮会读作可点。
                     IconButton(
