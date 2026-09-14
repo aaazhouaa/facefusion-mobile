@@ -384,9 +384,8 @@ fun SwapScreen(
     // and a standing 170 dp panel below the buttons made the page longer than it needed
     // to be on every screen, not just while something was running.
     var logExpanded by rememberSaveable { mutableStateOf(false) }
-    // The batch queue lives in a foldable card, default CLOSED, placed just above Output
-    // settings. The card is always on the page now -- an empty queue is the standing
-    // ask for the first clip -- it just stays folded until opened.
+    // The batch queue folds into a card opened from the swapped pane's label row,
+    // default CLOSED. The card itself only exists while open -- its header moved up.
     var batchMenuExpanded by rememberSaveable { mutableStateOf(false) }
     // The finished output (video player + save/share/delete) folds under its own card,
     // default CLOSED, above the log.
@@ -977,7 +976,7 @@ fun SwapScreen(
                         else -> R.string.swap_add_target
                     }),
                     // No weight: the tile wraps to its content (the 72 dp square while
-                    // empty, the 64 dp frame once filled) instead of stretching across
+                    // empty, the 72 dp frame once filled) instead of stretching across
                     // the row -- the voice tile takes the leftover width.
                     // The tile IS the picker. A separate full-width button said the same thing
                     // twice and cost a row of height the wordmark needed.
@@ -1135,380 +1134,467 @@ fun SwapScreen(
         val swappedDisplay = remember(preview.swapped) {
             preview.swapped?.displayThumb()?.first
         }
-        PreviewPane(
-            label = stringResource(R.string.swap_pane_swapped),
-            height = resultH,
-            bitmap = swappedDisplay,
-            placeholder = when {
-                modelsMissing -> ""
-                // Already a finished, localized sentence from the Activity -- notably
-                // the content gate's refusal, which must not be rebuilt here.
-                preview.note != null -> preview.note
-                preview.busy && !preview.warm ->
-                    stringResource(R.string.swap_loading_models)
-                preview.busy -> stringResource(R.string.swap_swapping_frame)
-                !hasSource -> stringResource(R.string.swap_pick_a_source)
-                // No "tap refresh" any more: the preview warms itself as soon as both
-                // inputs exist, so this is a transient state rather than an instruction.
-                else -> stringResource(R.string.swap_preparing_preview)
-            },
-            // Full-width container; the image box inside is narrower when the result is
-            // portrait (contentWidth), centred rather than letterboxed into side bars.
-            modifier = Modifier.fillMaxWidth(),
-            contentWidth = resultW,
-            // The download lives here rather than in a bar of its own: this is the pane
-            // that cannot draw anything without the models, so it is where their absence
-            // is already visible.
-            overlay = if (modelsMissing) { { DownloadOverlay(onDownload) } } else null,
-            zoom = zoom,
-        ) {
-            // Spinner WHILE working, save button when there is something to save. Never
-            // both: the fixed slot height in PreviewPane keeps either from moving the
-            // trim slider and the Swap button down the screen mid-interaction.
-            //
-            // The save writes the previewed frame straight out of the pane. The output
-            // pane has had a Save frame button since the video path existed, but it can
-            // only reach frames of a FINISHED run -- so pulling one still out of a clip
-            // meant swapping the whole clip first.
-            if (!preview.busy && preview.swapped != null) {
-                IconButton(onClick = onSavePreviewFrame, enabled = idle) {
-                    Icon(
-                        IconDownload,
-                        stringResource(R.string.out_save_frame),
-                        Modifier.size(18.dp),
-                    )
-                }
-            }
-            if (preview.busy) {
-                CircularProgressIndicator(
-                    Modifier.size(18.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        // ---------------------------------------------------------------- batch add
-        //
-        // 批量添加，位于输出设置上方，与输出设置同为可折叠菜单（默认折叠）。
-        // 内部容器采用与"源人脸"输入行相同的卡片样式，承载"添加更多片段"、
-        // "每个片段完成后立即保存到相册"以及已加入的片段列表。
-        SectionCard(
-            stringResource(R.string.swap_batch_menu),
-            collapsible = true,
-            expanded = batchMenuExpanded,
-            onToggle = { batchMenuExpanded = !batchMenuExpanded },
-            trailing = {
-                Row(
-                    Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(enabled = idle) { onBatchAutoSave(!batchAutoSave) }
-                        .padding(horizontal = 4.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+        // The pane is wrapped in a zero-extra Box purely as the batch menu's popup
+        // anchor: TopCenter then centres the dropdown on the page and the y-offset
+        // drops it just under the label row (3 dp container pad + 40 dp slot + 2 dp
+        // row pad = 45 dp from the pane's top edge).
+        Box(Modifier.fillMaxWidth()) {
+            PreviewPane(
+                label = stringResource(R.string.swap_pane_swapped),
+                height = resultH,
+                bitmap = swappedDisplay,
+                placeholder = when {
+                    modelsMissing -> ""
+                    // Already a finished, localized sentence from the Activity -- notably
+                    // the content gate's refusal, which must not be rebuilt here.
+                    preview.note != null -> preview.note
+                    preview.busy && !preview.warm ->
+                        stringResource(R.string.swap_loading_models)
+                    preview.busy -> stringResource(R.string.swap_swapping_frame)
+                    !hasSource -> stringResource(R.string.swap_pick_a_source)
+                    // No "tap refresh" any more: the preview warms itself as soon as both
+                    // inputs exist, so this is a transient state rather than an instruction.
+                    else -> stringResource(R.string.swap_preparing_preview)
+                },
+                // Full-width container; the image box inside is narrower when the result is
+                // portrait (contentWidth), centred rather than letterboxed into side bars.
+                modifier = Modifier.fillMaxWidth(),
+                contentWidth = resultW,
+                // The download lives here rather than in a bar of its own: this is the pane
+                // that cannot draw anything without the models, so it is where their absence
+                // is already visible.
+                overlay = if (modelsMissing) { { DownloadOverlay(onDownload) } } else null,
+                zoom = zoom,
+                // 存帧下载/加载圈：紧贴"换脸结果"标签之后的独立槽位。
+                afterLabel = {
+                    // Spinner WHILE working, save button when there is something to
+                    // save. Never both: the fixed slot height keeps either from moving
+                    // the trim slider and the Swap button down the screen mid-interaction.
+                    //
+                    // The save writes the previewed frame straight out of the pane. The
+                    // output pane has had a Save frame button since the video path existed,
+                    // but it can only reach frames of a FINISHED run -- so pulling one
+                    // still out of a clip meant swapping the whole clip first.
+                    if (!preview.busy && preview.swapped != null) {
+                        IconButton(onClick = onSavePreviewFrame, enabled = idle,
+                                   // The 48 dp touch width leaves ~15 dp of dead air on
+                                   // each side of the 18 dp icon; pull it back toward the
+                                   // label so the gap reads like the text's own padding.
+                                   modifier = Modifier.offset(x = (-12).dp)) {
+                            Icon(
+                                IconDownload,
+                                stringResource(R.string.out_save_frame),
+                                Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                    if (preview.busy) {
+                        CircularProgressIndicator(
+                            Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+                // 批量添加标题组（标题+箭头、自动保存、清空）：整组靠右，箭头随
+                // 展开状态翻转，菜单浮层见下方 Popup（居中下拉）。
+                trailing = {
+                    // 输出设置：原页面下方的折叠卡片，头部现进本组、在批量添加之前；
+                    // 内容以居中浮层挂在窗格锚点上（见下方第二个 Popup）。仅视频目
+                    // 标时出现；与批量菜单互斥，开一个关另一个。
+                    if (durationMs > 0) {
+                        Row(
+                            Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    trimExpanded = !trimExpanded
+                                    if (trimExpanded) batchMenuExpanded = false
+                                }
+                                .padding(horizontal = 4.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                stringResource(R.string.swap_output_settings),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 11.sp,
+                            )
+                            Spacer(Modifier.width(2.dp))
+                            Icon(
+                                Icons.Default.KeyboardArrowDown,
+                                stringResource(if (trimExpanded) R.string.common_collapse
+                                               else R.string.common_expand),
+                                Modifier
+                                    .size(20.dp)
+                                    .rotate(if (trimExpanded) 0f else 180f),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                batchMenuExpanded = !batchMenuExpanded
+                                if (batchMenuExpanded) trimExpanded = false
+                            }
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            stringResource(R.string.swap_batch_menu),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 11.sp,
+                        )
+                        Spacer(Modifier.width(2.dp))
+                        Icon(
+                            Icons.Default.KeyboardArrowDown,
+                            stringResource(if (batchMenuExpanded) R.string.common_collapse
+                                           else R.string.common_expand),
+                            Modifier
+                                .size(20.dp)
+                                .rotate(if (batchMenuExpanded) 0f else 180f),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    // 自动保存开关。
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(enabled = idle) { onBatchAutoSave(!batchAutoSave) }
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            Modifier
+                                .size(16.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (batchAutoSave) MaterialTheme.colorScheme.primary.copy(alpha = 0.69f)
+                                    else MaterialTheme.colorScheme.outlineVariant
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (batchAutoSave) {
+                                Icon(Icons.Default.Check, null, Modifier.size(11.dp),
+                                     tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.69f))
+                            }
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        Text(stringResource(R.string.batch_autosave),
+                             style = MaterialTheme.typography.bodySmall,
+                             fontSize = 11.sp)
+                    }
+                    // 清空全部。16dp 图标；队列空时不透明度降到 31%，读作"没有可清的
+                    // 东西"，但仍占着位置。跑批中同样 31%：图标已被禁用，全亮会读作可点。
+                    IconButton(
+                        onClearBatch,
+                        enabled = idle && batch.isNotEmpty(),
+                        modifier = Modifier.size(16.dp),
+                    ) {
+                        Icon(Icons.Default.Delete,
+                             stringResource(R.string.batch_clear_desc),
+                             Modifier.size(16.dp),
+                             tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                 .copy(alpha = if (idle && batch.isNotEmpty()) 1f else 0.31f))
+                    }
+                },
+            )
+            if (batchMenuExpanded) {
+                Popup(
+                    alignment = Alignment.TopCenter,
+                    offset = IntOffset(
+                        0,
+                        with(LocalDensity.current) { 42.dp.roundToPx() },
+                    ),
+                    onDismissRequest = { batchMenuExpanded = false },
+                    properties = PopupProperties(focusable = true),
                 ) {
                     Box(
                         Modifier
-                            .size(16.dp)
-                            .clip(CircleShape)
-                            .background(
-                                if (batchAutoSave) MaterialTheme.colorScheme.primary.copy(alpha = 0.69f)
-                                else MaterialTheme.colorScheme.outlineVariant
-                            ),
-                        contentAlignment = Alignment.Center,
+                            .width((screenW - 44).dp)
+                            .shadow(12.dp, RoundedCornerShape(20.dp))
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(MaterialTheme.colorScheme.surface)
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant,
+                                    RoundedCornerShape(20.dp))
+                            .padding(8.dp),
                     ) {
-                        if (batchAutoSave) {
-                            Icon(Icons.Default.Check, null, Modifier.size(11.dp),
-                                 tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.69f))
-                        }
-                    }
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.batch_autosave),
-                         style = MaterialTheme.typography.bodySmall,
-                         fontSize = 11.sp)
-                }
-                // 清空全部，"批量添加"元素自身（标题行 trailing）的右端——不在内容
-                // 区里。16dp 图标；队列空时不透明度降到 31%，读作"没有可清的东西"，
-                // 但仍占着位置。跑批中同样 31%：图标已被禁用，全亮会读作可点。
-                IconButton(
-                    onClearBatch,
-                    enabled = idle && batch.isNotEmpty(),
-                    modifier = Modifier.size(16.dp),
-                ) {
-                    Icon(Icons.Default.Delete,
-                         stringResource(R.string.batch_clear_desc),
-                         Modifier.size(16.dp),
-                         tint = MaterialTheme.colorScheme.onSurfaceVariant
-                             .copy(alpha = if (idle && batch.isNotEmpty()) 1f else 0.31f))
-                }
-            },
-        ) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(MaterialTheme.colorScheme.surface)
-                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant,
-                            RoundedCornerShape(16.dp)),
-            ) {
-                // 添加片段按钮（+） + 缩略图列表，横向排列
-                Row(
-                    Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 6.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // "+" 添加按钮，64dp，始终最左侧。
-                    // 需求2: 无条件渲染——旧判定 (hasTarget && !imageTarget) 让按钮在
-                    // "添加目标"为空时整个消失，批量菜单从此没有入口。点击事件除正在
-                    // 生成视频（run.busy）外始终生效：队列一旦开始跑就固定下来，防止
-                    // 跑批中途改队列。
-                    IconButton(
-                        onAddToBatch,
-                        enabled = !run.busy,
-                        modifier = Modifier
-                            .size(64.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
-                    ) {
-                        Icon(Icons.Default.Add, stringResource(R.string.swap_batch_add),
-                             Modifier.size(28.dp),
-                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    // 已添加的片段缩略图，64dp，横向排列
-                    batch.forEachIndexed { i, item ->
-                        Box(
+                        // 添加片段按钮（+） + 缩略图列表，横向排列
+                        Row(
                             Modifier
-                                .size(64.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .clickable(enabled = (idle || run.canCancel) && item.output != null) {
-                                    onOpenBatchOutput(i)
-                                },
-                            contentAlignment = Alignment.Center,
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 6.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            if (item.thumb != null) {
-                                val image = remember(item.thumb) { item.thumb.asImageBitmap() }
-                                Image(
-                                    image, null,
-                                    Modifier
-                                        .fillMaxSize()
-                                        .clip(RoundedCornerShape(6.dp)),
-                                    contentScale = ContentScale.Crop,
-                                )
-                            } else {
-                                Icon(Icons.Default.PlayArrow, null,
-                                     Modifier.size(24.dp),
+                            // "+" 添加按钮，64dp，始终最左侧。
+                            // 需求2: 无条件渲染——旧判定 (hasTarget && !imageTarget) 让按钮在
+                            // "添加目标"为空时整个消失，批量菜单从此没有入口。点击事件除正在
+                            // 生成视频（run.busy）外始终生效：队列一旦开始跑就固定下来，防止
+                            // 跑批中途改队列。
+                            IconButton(
+                                onAddToBatch,
+                                enabled = !run.busy,
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                            ) {
+                                Icon(Icons.Default.Add, stringResource(R.string.swap_batch_add),
+                                     Modifier.size(28.dp),
                                      tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            // 状态角标
-                            if (item.state != BatchState.Waiting) {
-                                Text(
-                                    stringResource(when (item.state) {
-                                        BatchState.Running -> R.string.batch_running
-                                        BatchState.Done -> R.string.batch_done
-                                        BatchState.Refused -> R.string.batch_refused
-                                        BatchState.Failed -> R.string.batch_failed
-                                        BatchState.Skipped -> R.string.batch_skipped
-                                        BatchState.Cancelled -> R.string.batch_cancelled
-                                        else -> R.string.batch_waiting
-                                    }),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontSize = 7.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = when (item.state) {
-                                        BatchState.Done -> FfRed
-                                        BatchState.Failed -> MaterialTheme.colorScheme.error
-                                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                    },
-                                    modifier = Modifier
-                                        .align(Alignment.BottomCenter)
-                                        .background(
-                                            MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
-                                            RoundedCornerShape(3.dp),
-                                        )
-                                        .padding(horizontal = 3.dp, vertical = 1.dp),
-                                )
-                            }
-                            // 已保存角标：该片段的成品已在相册（手动或自动保存）。放左上
-                            // 角，与底部状态角标、右上删除按钮错开——不用点开删除确认，
-                            // 哪些片段的成品已经在相册里一眼可辨，确认弹窗的计数也就对得
-                            // 上了。
-                            if (item.savedUri != null) {
-                                Text(
-                                    stringResource(R.string.batch_saved),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontSize = 7.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier
-                                        .align(Alignment.TopStart)
-                                        .background(
-                                            MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
-                                            RoundedCornerShape(3.dp),
-                                        )
-                                        .padding(horizontal = 3.dp, vertical = 1.dp),
-                                )
-                            }
-                            // 删除按钮
-                            if (idle) {
-                                IconButton(
-                                    { onRemoveFromBatch(i) },
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .size(18.dp)
-                                        .offset(x = 2.dp, y = (-2).dp),
+                            // 已添加的片段缩略图，64dp，横向排列
+                            batch.forEachIndexed { i, item ->
+                                Box(
+                                    Modifier
+                                        .size(64.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                                        .clickable(enabled = (idle || run.canCancel) && item.output != null) {
+                                            onOpenBatchOutput(i)
+                                        },
+                                    contentAlignment = Alignment.Center,
                                 ) {
-                                    Icon(Icons.Default.Delete,
-                                         stringResource(R.string.batch_remove),
-                                         Modifier.size(12.dp),
-                                         tint = Color.White)
+                                    if (item.thumb != null) {
+                                        val image = remember(item.thumb) { item.thumb.asImageBitmap() }
+                                        Image(
+                                            image, null,
+                                            Modifier
+                                                .fillMaxSize()
+                                                .clip(RoundedCornerShape(6.dp)),
+                                            contentScale = ContentScale.Crop,
+                                        )
+                                    } else {
+                                        Icon(Icons.Default.PlayArrow, null,
+                                             Modifier.size(24.dp),
+                                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    // 状态角标
+                                    if (item.state != BatchState.Waiting) {
+                                        Text(
+                                            stringResource(when (item.state) {
+                                                BatchState.Running -> R.string.batch_running
+                                                BatchState.Done -> R.string.batch_done
+                                                BatchState.Refused -> R.string.batch_refused
+                                                BatchState.Failed -> R.string.batch_failed
+                                                BatchState.Skipped -> R.string.batch_skipped
+                                                BatchState.Cancelled -> R.string.batch_cancelled
+                                                else -> R.string.batch_waiting
+                                            }),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontSize = 7.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            color = when (item.state) {
+                                                BatchState.Done -> FfRed
+                                                BatchState.Failed -> MaterialTheme.colorScheme.error
+                                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                            },
+                                            modifier = Modifier
+                                                .align(Alignment.BottomCenter)
+                                                .background(
+                                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                                                    RoundedCornerShape(3.dp),
+                                                )
+                                                .padding(horizontal = 3.dp, vertical = 1.dp),
+                                        )
+                                    }
+                                    // 已保存角标：该片段的成品已在相册（手动或自动保存）。放左上
+                                    // 角，与底部状态角标、右上删除按钮错开——不用点开删除确认，
+                                    // 哪些片段的成品已经在相册里一眼可辨，确认弹窗的计数也就对得
+                                    // 上了。
+                                    if (item.savedUri != null) {
+                                        Text(
+                                            stringResource(R.string.batch_saved),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontSize = 7.sp,
+                                            fontFamily = FontFamily.Monospace,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier
+                                                .align(Alignment.TopStart)
+                                                .background(
+                                                    MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                                                    RoundedCornerShape(3.dp),
+                                                )
+                                                .padding(horizontal = 3.dp, vertical = 1.dp),
+                                        )
+                                    }
+                                    // 删除按钮
+                                    if (idle) {
+                                        IconButton(
+                                            { onRemoveFromBatch(i) },
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .size(18.dp)
+                                                .offset(x = 2.dp, y = (-2).dp),
+                                        ) {
+                                            Icon(Icons.Default.Delete,
+                                                 stringResource(R.string.batch_remove),
+                                                 Modifier.size(12.dp),
+                                                 tint = Color.White)
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-        }
-
-        // ---------------------------------------------------------------- trim
-        //
-        // Clip and frame rate share ONE foldable card, closed by default. They are
-        // per-run tuning knobs, not standing controls, and two standing controls -- the
-        // range slider plus the rate steps -- pushed the Swap button off the first
-        // screen on every video target. The card keeps the chosen range in its header,
-        // 输出设置（首项为片段，然后是输出尺寸与帧率）
-        if (durationMs > 0) {
-            SectionCard(
-                stringResource(R.string.swap_output_settings),
-                collapsible = true,
-                expanded = trimExpanded,
-                onToggle = { trimExpanded = !trimExpanded },
-            ) {
-                // 片段 — 输出设置首项
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
+            // The 输出设置 dropdown: same anchor and centred card as the batch menu,
+            // holding the clip trim + output size + frame rate that used to sit in
+            // their own SectionCard lower on the page (the knobs are per-run and
+            // closed by default -- standing controls pushed the Swap button off the
+            // first screen on every video target).
+            if (durationMs > 0 && trimExpanded) {
+                Popup(
+                    alignment = Alignment.TopCenter,
+                    offset = IntOffset(
+                        0,
+                        with(LocalDensity.current) { 42.dp.roundToPx() },
+                    ),
+                    onDismissRequest = { trimExpanded = false },
+                    properties = PopupProperties(focusable = true),
                 ) {
-                    Text(
-                        stringResource(R.string.swap_clip_rate),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Text(
-                        "${fmt(trimStartMs)} – ${fmt(trimEndMs)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                }
-                val trimSliderColors = SliderDefaults.colors(
-                    thumbColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
-                    activeTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
-                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.69f),
-                )
-                RangeSlider(
-                    value = trimStartMs..trimEndMs,
-                    onValueChange = { r ->
-                        // Which handle moved: RangeSlider reports the whole range, so the
-                        // edge has to be inferred by comparing against what it was. The
-                        // previews then follow the handle under the finger rather than
-                        // always showing the start frame.
-                        val edge = if (r.start != trimStartMs) TrimEdge.Start else TrimEdge.End
-                        // Keep at least a third of a second, so the encoder always gets a frame.
-                        onTrimChange(r.start, maxOf(r.endInclusive, r.start + 333f), edge)
-                    },
-                    valueRange = 0f..durationMs.toFloat(),
-                    enabled = idle,
-                    colors = trimSliderColors,
-                )
-                // The REAL rate, not a hardcoded 30. The estimate was wrong on every
-                // clip that was not 30 fps, and it is the number the ETA is read against.
-                val effFps = if (opts.outputFps in 1..inputFps) opts.outputFps else inputFps
-                val estFrames = ((trimEndMs - trimStartMs) / 1000f * effFps).roundToInt()
-                Text(
-                    stringResource(R.string.swap_clip_summary,
-                                   estFrames, fmt(durationMs.toFloat()), effFps),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                    Box(
+                        Modifier
+                            .width((screenW - 44).dp)
+                            .shadow(12.dp, RoundedCornerShape(20.dp))
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(MaterialTheme.colorScheme.surface)
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant,
+                                    RoundedCornerShape(20.dp))
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            // 片段 — 输出设置首项
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    stringResource(R.string.swap_clip_rate),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Text(
+                                    "${fmt(trimStartMs)} – ${fmt(trimEndMs)}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                            }
+                            val trimSliderColors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
+                                activeTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.69f),
+                                inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.69f),
+                            )
+                            RangeSlider(
+                                value = trimStartMs..trimEndMs,
+                                onValueChange = { r ->
+                                    // Which handle moved: RangeSlider reports the whole range, so the
+                                    // edge has to be inferred by comparing against what it was. The
+                                    // previews then follow the handle under the finger rather than
+                                    // always showing the start frame.
+                                    val edge = if (r.start != trimStartMs) TrimEdge.Start else TrimEdge.End
+                                    // Keep at least a third of a second, so the encoder always gets a frame.
+                                    onTrimChange(r.start, maxOf(r.endInclusive, r.start + 333f), edge)
+                                },
+                                valueRange = 0f..durationMs.toFloat(),
+                                enabled = idle,
+                                colors = trimSliderColors,
+                            )
+                            // The REAL rate, not a hardcoded 30. The estimate was wrong on every
+                            // clip that was not 30 fps, and it is the number the ETA is read against.
+                            val effFps = if (opts.outputFps in 1..inputFps) opts.outputFps else inputFps
+                            val estFrames = ((trimEndMs - trimStartMs) / 1000f * effFps).roundToInt()
+                            Text(
+                                stringResource(R.string.swap_clip_summary,
+                                               estFrames, fmt(durationMs.toFloat()), effFps),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
 
-                // Frame rate and output size are the same kind of decision.
-                Spacer(Modifier.height(6.dp))
-                // ⚠ The SOURCE option is named by its own number, not by the word "same".
-                // Sitting in a row that reads 480p / 720p / 1080p, "Same as source" was the
-                // one chip that did not say what it would produce -- and the clip's size is
-                // already on this screen, so there was nothing to look up. A clip whose
-                // short edge is not a familiar number ("606p") still reads honestly, and
-                // the hint underneath carries the full WxH either way.
-                val srcShort = minOf(targetW, targetH)
-                // "Same (960p)": the word says what the choice MEANS and the number says
-                // what it produces. The number alone made the source chip look like one
-                // more fixed size rather than the leave-it-alone option, which is what it
-                // is and what most runs want.
-                val srcName = if (srcShort > 0)
-                                  stringResource(R.string.swap_size_source_at, srcShort)
-                              else stringResource(R.string.swap_size_source)
-                // OUTPUT SIZE, on the SHORT edge so the aspect ratio never changes and
-                // "480p" means what it means everywhere else. Only sizes BELOW the clip's
-                // own are offered, for the same reason the frame rate only offers lower
-                // rates: enlarging costs bitrate and adds nothing, because the swapper runs
-                // at 256 whatever the frame is.
-                //
-                // ⚠ It is applied at DECODE, so it makes the RUN faster too -- detector prep
-                // and paste-back scale with frame area, and 4K is ~9x the area of 1080p.
-                // What it cannot do is make a face sharper; that is pixel boost and the
-                // enhancer, and this control must not be mistaken for them.
-                val shortEdge = srcShort
-                val sizes = listOf(480, 720, 1080).filter { it < shortEdge }
-                                .map { it to (it.toString() + "p") } +
-                            listOf(0 to srcName)
-                if (sizes.size > 1) {
-                    OptionSteps(
-                        stringResource(R.string.swap_output_size),
-                        sizes,
-                        if (opts.outputMaxShortEdge in 1 until shortEdge)
-                            opts.outputMaxShortEdge else 0,
-                        { onOptsChange(opts.copy(outputMaxShortEdge = it)) },
-                        hint = if (opts.outputMaxShortEdge in 1 until shortEdge)
-                                   stringResource(R.string.swap_size_hint_smaller)
-                               else if (targetW > 0 && targetH > 0)
-                                   stringResource(R.string.swap_size_hint_source_dims,
-                                                  targetW, targetH)
-                               else stringResource(R.string.swap_size_hint_source),
-                        enabled = idle,
-                    )
-                }
+                            // Frame rate and output size are the same kind of decision.
+                            Spacer(Modifier.height(6.dp))
+                            // ⚠ The SOURCE option is named by its own number, not by the word "same".
+                            // Sitting in a row that reads 480p / 720p / 1080p, "Same as source" was the
+                            // one chip that did not say what it would produce -- and the clip's size is
+                            // already on this screen, so there was nothing to look up. A clip whose
+                            // short edge is not a familiar number ("606p") still reads honestly, and
+                            // the hint underneath carries the full WxH either way.
+                            val srcShort = minOf(targetW, targetH)
+                            // "Same (960p)": the word says what the choice MEANS and the number says
+                            // what it produces. The number alone made the source chip look like one
+                            // more fixed size rather than the leave-it-alone option, which is what it
+                            // is and what most runs want.
+                            val srcName = if (srcShort > 0)
+                                              stringResource(R.string.swap_size_source_at, srcShort)
+                                          else stringResource(R.string.swap_size_source)
+                            // OUTPUT SIZE, on the SHORT edge so the aspect ratio never changes and
+                            // "480p" means what it means everywhere else. Only sizes BELOW the clip's
+                            // own are offered, for the same reason the frame rate only offers lower
+                            // rates: enlarging costs bitrate and adds nothing, because the swapper runs
+                            // at 256 whatever the frame is.
+                            //
+                            // ⚠ It is applied at DECODE, so it makes the RUN faster too -- detector prep
+                            // and paste-back scale with frame area, and 4K is ~9x the area of 1080p.
+                            // What it cannot do is make a face sharper; that is pixel boost and the
+                            // enhancer, and this control must not be mistaken for them.
+                            val shortEdge = srcShort
+                            val sizes = listOf(480, 720, 1080).filter { it < shortEdge }
+                                            .map { it to (it.toString() + "p") } +
+                                        listOf(0 to srcName)
+                            if (sizes.size > 1) {
+                                OptionSteps(
+                                    stringResource(R.string.swap_output_size),
+                                    sizes,
+                                    if (opts.outputMaxShortEdge in 1 until shortEdge)
+                                        opts.outputMaxShortEdge else 0,
+                                    { onOptsChange(opts.copy(outputMaxShortEdge = it)) },
+                                    hint = if (opts.outputMaxShortEdge in 1 until shortEdge)
+                                               stringResource(R.string.swap_size_hint_smaller)
+                                           else if (targetW > 0 && targetH > 0)
+                                               stringResource(R.string.swap_size_hint_source_dims,
+                                                              targetW, targetH)
+                                           else stringResource(R.string.swap_size_hint_source),
+                                    enabled = idle,
+                                )
+                            }
 
-                // Frame rate. Only rates BELOW the input's are offered: a higher one would
-                // duplicate frames, and each duplicate costs a full swap to produce nothing
-                // new. Dropping frames is the only direction that saves anything.
-                //
-                // ⚠ The low stops are the point, and 24/30/60 alone were not enough to be
-                // useful. On a 30 fps clip the deepest cut available was 24 -- a 20% saving
-                // against the CPU backend, which is an order of magnitude slower than the
-                // NPU -- and on a 24 fps clip nothing qualified, so the control hid itself
-                // and offered no reduction at all. 5/10/15 are what make it worth having:
-                // 30 -> 10 is a third of the frames and close to a third of the time,
-                // because VideoSwapper decimates BEFORE the swap rather than after it.
-                //
-                // Ascending, with "same as source" last: the slider then runs from cheapest
-                // on the left to full quality on the right, which is the direction the
-                // trade-off reads in.
-                val rates = listOf(5, 10, 15, 24, 30, 60).filter { it < inputFps }
-                                .map { it to "$it" } +
-                            listOf(0 to stringResource(R.string.swap_rate_same, inputFps))
-                if (rates.size > 1) {
-                    OptionSteps(
-                        stringResource(R.string.swap_frame_rate),
-                        rates,
-                        if (opts.outputFps in 1..inputFps) opts.outputFps else 0,
-                        { onOptsChange(opts.copy(outputFps = it)) },
-                        hint = if (opts.outputFps == 0 || opts.outputFps >= inputFps)
-                                   stringResource(R.string.swap_rate_hint_every)
-                               else stringResource(R.string.swap_rate_hint_drop),
-                        enabled = idle,
-                    )
+                            // Frame rate. Only rates BELOW the input's are offered: a higher one would
+                            // duplicate frames, and each duplicate costs a full swap to produce nothing
+                            // new. Dropping frames is the only direction that saves anything.
+                            //
+                            // ⚠ The low stops are the point, and 24/30/60 alone were not enough to be
+                            // useful. On a 30 fps clip the deepest cut available was 24 -- a 20% saving
+                            // against the CPU backend, which is an order of magnitude slower than the
+                            // NPU -- and on a 24 fps clip nothing qualified, so the control hid itself
+                            // and offered no reduction at all. 5/10/15 are what make it worth having:
+                            // 30 -> 10 is a third of the frames and close to a third of the time,
+                            // because VideoSwapper decimates BEFORE the swap rather than after it.
+                            //
+                            // Ascending, with "same as source" last: the slider then runs from cheapest
+                            // on the left to full quality on the right, which is the direction the
+                            // trade-off reads in.
+                            val rates = listOf(5, 10, 15, 24, 30, 60).filter { it < inputFps }
+                                            .map { it to "$it" } +
+                                        listOf(0 to stringResource(R.string.swap_rate_same, inputFps))
+                            if (rates.size > 1) {
+                                OptionSteps(
+                                    stringResource(R.string.swap_frame_rate),
+                                    rates,
+                                    if (opts.outputFps in 1..inputFps) opts.outputFps else 0,
+                                    { onOptsChange(opts.copy(outputFps = it)) },
+                                    hint = if (opts.outputFps == 0 || opts.outputFps >= inputFps)
+                                               stringResource(R.string.swap_rate_hint_every)
+                                           else stringResource(R.string.swap_rate_hint_drop),
+                                    enabled = idle,
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

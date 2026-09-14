@@ -379,6 +379,8 @@ fun PreviewPane(
      * letterboxing a portrait result into grey side bars.
      */
     contentWidth: Dp? = null,
+    /** Small action right behind the label plate, in its own pinned 40 dp slot. */
+    afterLabel: @Composable () -> Unit = {},
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
     // ONE container around the caption row AND the image, rather than a caption floating
@@ -416,27 +418,25 @@ fun PreviewPane(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
-                    .weight(1f, fill = false)
                     .clip(RoundedCornerShape(6.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant)
                     .padding(horizontal = 8.dp, vertical = 3.dp),
             )
-            // Fixed HEIGHT, whatever the slot holds; width still wraps.
-            //
-            // It used to size to its content, and content alternated between an 18 dp
-            // spinner and a 28 dp IconButton -- so starting a preview changed the label
-            // row's height and shoved the trim slider and the Swap button down the screen
-            // mid-interaction. Reserving the larger height makes the swap invisible.
-            //
-            // Height only: the shift was vertical, and pinning the width too would clip the
-            // "Change" button the original pane carries.
-            Box(
-                // 40 dp, not 28: a Material TextButton has a 40 dp minimum height, so
-                // reserving an IconButton's 28 clipped "Change" and "Save frame" to their
-                // top halves. Reserve the tallest thing the slot can hold.
-                Modifier.height(40.dp),
-                contentAlignment = Alignment.Center,
-            ) {
+            // Both action slots pin a fixed HEIGHT; width still wraps. They used to
+            // size to their content, and content alternated between an 18 dp spinner
+            // and a 28 dp IconButton -- so starting a preview changed the label row's
+            // height and shoved the trim slider and the Swap button down the screen
+            // mid-interaction. 40 dp, not 28: a Material TextButton has a 40 dp
+            // minimum height, so reserving an IconButton's 28 clipped them to their
+            // top halves. Height only: the shift was vertical, and pinning the width
+            // too would clip the buttons.
+            Box(Modifier.height(40.dp), contentAlignment = Alignment.Center) {
+                afterLabel()
+            }
+            // Plate and its after-label slot sit flush left; the spacer eats the
+            // leftover width so the trailing group sits flush right.
+            Spacer(Modifier.weight(1f))
+            Box(Modifier.height(40.dp), contentAlignment = Alignment.Center) {
                 Row(verticalAlignment = Alignment.CenterVertically, content = trailing)
             }
         }
