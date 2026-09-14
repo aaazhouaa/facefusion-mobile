@@ -1213,7 +1213,7 @@ fun SwapScreen(
                                 stringResource(R.string.swap_output_settings),
                                 Modifier
                                     .size(32.dp)
-                                    .offset(x = 8.dp)
+                                    .offset(x = 2.dp)
                                     .clip(RoundedCornerShape(8.dp))
                                     .clickable {
                                         trimExpanded = !trimExpanded
@@ -1232,7 +1232,7 @@ fun SwapScreen(
                             stringResource(R.string.swap_batch_menu),
                             Modifier
                                 .size(34.dp)
-                                .offset(x = 8.dp)
+                                .offset(x = 2.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .clickable {
                                     batchMenuExpanded = !batchMenuExpanded
@@ -1250,7 +1250,7 @@ fun SwapScreen(
                             stringResource(R.string.batch_autosave),
                             Modifier
                                 .size(32.dp)
-                                .offset(x = 8.dp)
+                                .offset(x = 2.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .clickable(enabled = idle) { onBatchAutoSave(!batchAutoSave) }
                                 .padding(6.dp),
@@ -1265,10 +1265,7 @@ fun SwapScreen(
                     IconButton(
                         onClearBatch,
                         enabled = idle && batch.isNotEmpty(),
-                        // 同「音频」瓦片右下删除图形的水平位置：图标列 28 dp 盒中心在
-                        // 页面右端-32 dp，而标签行右端在-24 dp、32 dp 盒中心在-40 dp。
-                        // +8 dp 补齐（标签行右端与瓦片行右端的固定差）。
-                        modifier = Modifier.size(32.dp).offset(x = 8.dp),
+                        modifier = Modifier.size(32.dp).offset(x = 2.dp),
                     ) {
                         HintIcon(stringResource(R.string.batch_clear_desc)) {
                             Icon(Icons.Default.Delete,

@@ -822,6 +822,10 @@ fun FaceTile(
                 .height(72.dp)
                 .then(if (stretch) Modifier.fillMaxWidth() else Modifier.width(72.dp))
                 .clip(RoundedCornerShape(16.dp))
+                // The frame belongs to the CONTENT only: the icon strip below stays
+                // borderless, so the square reads as the input's own well.
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant,
+                        RoundedCornerShape(16.dp))
                 .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
             contentAlignment = Alignment.Center,
         ) {
