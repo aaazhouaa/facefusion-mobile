@@ -1232,10 +1232,8 @@ fun SwapScreen(
                     // still out of a clip meant swapping the whole clip first.
                     if (!preview.busy && preview.swapped != null) {
                         IconButton(onClick = onSavePreviewFrame, enabled = idle,
-                                   // The 48 dp touch width leaves dead air around the
-                                   // icon; pull it back toward the label so the gap reads
-                                   // like the text's own padding.
-                                   modifier = Modifier.offset(x = (-12).dp)) {
+                                   // 用户实测 -7 dp 仍差一点：再向左 1 dp。
+                                   modifier = Modifier.offset(x = (-8).dp)) {
                             HintIcon(stringResource(R.string.out_save_frame)) {
                                 Icon(
                                     IconDownload,
@@ -1270,6 +1268,7 @@ fun SwapScreen(
                                 stringResource(R.string.swap_output_settings),
                                 Modifier
                                     .size(32.dp)
+                                    .offset(x = 8.dp)
                                     .clip(RoundedCornerShape(8.dp))
                                     .clickable {
                                         trimExpanded = !trimExpanded
@@ -1288,6 +1287,7 @@ fun SwapScreen(
                             stringResource(R.string.swap_batch_menu),
                             Modifier
                                 .size(34.dp)
+                                .offset(x = 8.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .clickable {
                                     batchMenuExpanded = !batchMenuExpanded
@@ -1305,6 +1305,7 @@ fun SwapScreen(
                             stringResource(R.string.batch_autosave),
                             Modifier
                                 .size(32.dp)
+                                .offset(x = 8.dp)
                                 .clip(RoundedCornerShape(8.dp))
                                 .clickable(enabled = idle) { onBatchAutoSave(!batchAutoSave) }
                                 .padding(6.dp),
@@ -1319,7 +1320,10 @@ fun SwapScreen(
                     IconButton(
                         onClearBatch,
                         enabled = idle && batch.isNotEmpty(),
-                        modifier = Modifier.size(32.dp),
+                        // 同「音频」瓦片右下删除图形的水平位置：图标列 28 dp 盒中心在
+                        // 页面右端-32 dp，而标签行右端在-24 dp、32 dp 盒中心在-40 dp。
+                        // +8 dp 补齐（标签行右端与瓦片行右端的固定差）。
+                        modifier = Modifier.size(32.dp).offset(x = 8.dp),
                     ) {
                         HintIcon(stringResource(R.string.batch_clear_desc)) {
                             Icon(Icons.Default.Delete,
