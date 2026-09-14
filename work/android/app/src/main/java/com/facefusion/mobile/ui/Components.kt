@@ -527,13 +527,18 @@ fun PreviewPane(
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 letterSpacing = 1.2.sp,
-                fontSize = 10.sp,
+                // Larger than the 10 sp this plate used to carry: "换脸结果" is the pane
+                // the user came for, and at 10 sp it read as small as the field labels.
+                fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .clip(RoundedCornerShape(6.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                    // Asymmetric: 3 dp off the leading edge only, so the plate's text
+                    // starts closer to the pane's left without moving its trailing edge
+                    // or the slots that follow it.
+                    .padding(start = 5.dp, end = 8.dp, top = 3.dp, bottom = 3.dp),
             )
             // Both action slots pin a fixed HEIGHT; width still wraps. They used to
             // size to their content, and content alternated between an 18 dp spinner
@@ -757,9 +762,9 @@ fun PreviewPane(
 }
 
 /**
- * One input of the workbench row: an 80 x 80 dp content square with every action icon the
+ * One input of the workbench row: a 72 x 72 dp content square with every action icon the
  * tile owns laid out in a strip UNDER it. Source face, target and voice all share this
- * form, and the three sit inside one bordered card (see SwapScreen).
+ * form, and the three sit together inside one surface (see SwapScreen).
  *
  * They used to be full-height panes; a portrait clip pushed them off the first screen and
  * the panes competed with the stage chips for what a fresh install sees. The square keeps
@@ -803,7 +808,7 @@ fun FaceTile(
     footerTrailing: Boolean = false,
     /**
      * The one tile that stretches (the voice tile, when it carries a `weight`): its
-     * content fills the tile's width instead of staying a fixed 80 dp square, so a long
+     * content fills the tile's width instead of staying a fixed 72 dp square, so a long
      * voice name is not clipped by a square that is narrower than the surface.
      */
     stretch: Boolean = false,
@@ -817,8 +822,8 @@ fun FaceTile(
     ) {
         Box(
             Modifier
-                .height(80.dp)
-                .then(if (stretch) Modifier.fillMaxWidth() else Modifier.width(80.dp))
+                .height(72.dp)
+                .then(if (stretch) Modifier.fillMaxWidth() else Modifier.width(72.dp))
                 .clip(RoundedCornerShape(16.dp))
                 .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
             contentAlignment = Alignment.Center,

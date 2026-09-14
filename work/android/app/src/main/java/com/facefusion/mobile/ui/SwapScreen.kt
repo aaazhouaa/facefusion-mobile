@@ -699,7 +699,7 @@ fun SwapScreen(
                 // Boxed to the CONTENT square's height and centred in it, so the arrow
                 // lines up with the two tiles' pictures -- not with the whole tile, whose
                 // icon strip hangs below the picture.
-                Box(Modifier.height(80.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.height(72.dp), contentAlignment = Alignment.Center) {
                     Text(
                         "⇒",
                         style = MaterialTheme.typography.titleMedium,
@@ -1178,8 +1178,8 @@ fun SwapScreen(
                     // still out of a clip meant swapping the whole clip first.
                     if (!preview.busy && preview.swapped != null) {
                         IconButton(onClick = onSavePreviewFrame, enabled = idle,
-                                   // 用户实测 -7 dp 仍差一点：再向左 1 dp。
-                                   modifier = Modifier.offset(x = (-8).dp)) {
+                                   // 用户实测 -22 dp 偏右：向左 1 dp。
+                                   modifier = Modifier.offset(x = (-23).dp)) {
                             HintIcon(stringResource(R.string.out_save_frame)) {
                                 Icon(
                                     IconDownload,
