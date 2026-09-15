@@ -12,6 +12,14 @@
     -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!--
+        A swap run is minutes of NPU work the user asked to continue in the background.
+        BatchService keeps the PROCESS from being reclaimed, but nothing keeps the CPU
+        awake: with the screen off Android may suspend it and the run stalls until the user
+        comes back. Held only for the length of a run (see MainActivity.acquireRunWakeLock).
+    -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
         <!-- Live tab (dev builds only). Not `required`: the app is a file-in/file-out

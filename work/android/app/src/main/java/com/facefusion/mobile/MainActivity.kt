@@ -6,6 +6,7 @@ import android.graphics.ImageDecoder
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Bundle
+import android.os.PowerManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -2131,6 +2132,9 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
         scrubJob?.cancel()
         stopVoicePlayback()
+        // A run's coroutine dies with the Activity's scope, so its own release never runs:
+        // hand the lock back here or the CPU stays awake after the app is gone.
+        releaseRunWakeLock()
         // Before the preview's own teardown: the pump holds the pipeline this is about to
         // release, and stop() is what makes it let go.
         player.stop()
@@ -4263,6 +4267,34 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * A PARTIAL_WAKE_LOCK held for the length of a swap run.
+     *
+     * BatchService keeps the PROCESS off the low-memory killer's list, but a foreground
+     * service does not keep the CPU running: with the screen off Android suspends it and
+     * the native loop simply stops until the user comes back. A swap the user deliberately
+     * sent to the background should finish, so this holds the CPU awake while one runs.
+     *
+     * Only PARTIAL: the screen must still be allowed to go off.
+     */
+    private var runWakeLock: PowerManager.WakeLock? = null
+
+    private fun acquireRunWakeLock() {
+        if (runWakeLock != null) return
+        val pm = getSystemService(PowerManager::class.java) ?: return
+        runWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "facefusion:swap")
+            .apply {
+                setReferenceCounted(false)
+                runCatching { acquire() }
+            }
+    }
+
+    private fun releaseRunWakeLock() {
+        val wl = runWakeLock ?: return
+        runWakeLock = null
+        runCatching { if (wl.isHeld) wl.release() }
+    }
+
     private fun runSwap() {
         val src = sourceUri ?: return
         val tgt = targetFile ?: return
@@ -4275,6 +4307,9 @@ class MainActivity : ComponentActivity() {
         invalidatePreview()
         cancelRequested = false
         busy = true; progress = 0f; log = ""
+        // Hold the CPU awake for the whole run; released on both exits below and in
+        // onDestroy.
+        acquireRunWakeLock()
         // Deletes the PREVIOUS run's file, not merely the reference to it.
         discardOutput()
         preview = null; framesDone = 0; framesTotal = 0; elapsedS = 0.0
@@ -4285,6 +4320,7 @@ class MainActivity : ComponentActivity() {
             if (!withContext(Dispatchers.Default) { PipeGuard.acquire("swap", 5000) }) {
                 status = pipeBusyMessage()
                 busy = false
+                releaseRunWakeLock()
                 return@launch
             }
             val result = withContext(Dispatchers.Default) {
@@ -4472,6 +4508,7 @@ class MainActivity : ComponentActivity() {
             NativePipe.release()
             PipeGuard.release()
             busy = false
+            releaseRunWakeLock()
         }
     }
 
@@ -4509,6 +4546,9 @@ class MainActivity : ComponentActivity() {
         cancelRequested = false
         runBatchUi = true
         busy = true; progress = 0f; log = ""
+        // Hold the CPU awake for the whole batch; released in the finally below and in
+        // onDestroy.
+        acquireRunWakeLock()
         discardOutput()
         preview = null; framesDone = 0; framesTotal = 0; elapsedS = 0.0
 
@@ -4547,6 +4587,7 @@ class MainActivity : ComponentActivity() {
             if (!withContext(Dispatchers.Default) { PipeGuard.acquire("batch", 5000) }) {
                 status = pipeBusyMessage(); busy = false
                 BatchStatus.end(); BatchService.stop(this@MainActivity)
+                releaseRunWakeLock()
                 return@launch
             }
             // ⚠ try/finally around EVERYTHING after the acquire, for the same reason
@@ -4799,6 +4840,7 @@ class MainActivity : ComponentActivity() {
                 // Ends the notify thread, which stops the service itself.
                 BatchStatus.end()
                 BatchService.stop(this@MainActivity)
+                releaseRunWakeLock()
             }
         }
     }
