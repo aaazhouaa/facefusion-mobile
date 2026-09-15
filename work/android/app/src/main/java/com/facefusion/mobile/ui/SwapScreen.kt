@@ -1689,33 +1689,19 @@ fun SwapScreen(
             // a queue with runnable rows can start even with an empty target pane;
             // requiring hasTarget here left the button dead on exactly the screen a
             // row delete produces (pane cleared, queue intact).
+            // 只要队列里还有片段（哪怕全部已跑完），按钮就保持可用——跑完即可再次执行，
+            // 不再用"是否已全部落地"去禁用。
             val ready = hasSource &&
-                        (hasTarget || batch.any {
-                            it.state == BatchState.Waiting ||
-                            it.state == BatchState.Running ||
-                            it.state == BatchState.Cancelled
-                        }) &&
+                        (hasTarget || batch.isNotEmpty()) &&
                         !modelsMissing && (!opts.lipSync || hasVoice)
-            // A batch whose every row has landed (Done/Refused/Failed/Skipped) is a RESULT,
-            // not a pending run. The button used to keep reading "Swap n clips" and stayed
-            // clickable, and pressing it again deleted every finished output just to run
-            // the same batch a second time. It reads "Start" again and stays dead until a
-            // row is waiting again -- clear rows or add clips to run more.
-            // 需求5: Cancelled rows are RUNNABLE again -- a stopped batch is a batch
-            // the user may want to finish, so the button comes back instead of staying
-            // dead until a row is cleared by hand.
-            val batchDone = batch.isNotEmpty() && batch.none {
-                it.state == BatchState.Waiting || it.state == BatchState.Running ||
-                it.state == BatchState.Cancelled
-            }
             // 需求5: runBatchUi (canCancel) means a batch is between START and its
             // rows being reset -- the button must answer a cancel through that whole
             // window, including the instant busy has dropped but the rows still read
             // finished.
-            val canRun = idle && ready && !batchDone
+            val canRun = idle && ready
             val clickable = busy || run.canCancel || canRun
             // 只有真正缺条件才置灰；preparing 期间按钮保持品牌色，只是暂时不可点。
-            val dimmed = !clickable && (!ready || batchDone)
+            val dimmed = !clickable && !ready
             val playEnabled = hasSource && hasTarget && idle && !modelsMissing &&
                 batch.size <= 1
             val playDimmed = !playEnabled
@@ -1773,7 +1759,7 @@ fun SwapScreen(
                             Text(
                                 stringResource(
                                     if (busy || run.canCancel) R.string.swap_cancel
-                                    else if (batch.size > 1 && !batchDone) R.string.swap_action_batch
+                                    else if (batch.size > 1) R.string.swap_action_batch
                                     else R.string.swap_action,
                                     batch.size,
                                 ),

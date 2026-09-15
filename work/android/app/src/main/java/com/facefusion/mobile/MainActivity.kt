@@ -331,9 +331,8 @@ class MainActivity : ComponentActivity() {
      * True from the moment a batch STARTS until its rows are reset for the next one.
      *
      * 需求5: `busy` drops back the instant the loop unwinds, and a cancelled batch's
-     * rows read Done/Cancelled rather than Waiting -- so the batchDone guard made the
-     * button dead with no way back. runBatchUi covers the window the rows are still
-     * "in flight", and it is what the main button keys its cancel on.
+     * rows read Done/Cancelled rather than Waiting -- runBatchUi covers the window the
+     * rows are still "in flight", and it is what the main button keys its cancel on.
      */
     private var runBatchUi by mutableStateOf(false)
 
@@ -1800,10 +1799,10 @@ class MainActivity : ComponentActivity() {
                                     // the batch runner deliberately ignores trim, because
                                     // one range cannot mean anything across clips of
                                     // different lengths.
-                                    // ⚠ NOT when every row has already landed: re-running
-                                    // a finished batch from here deleted every finished
-                                    // output just to make the same clips again.
-                                    if (batchQueue.isNotEmpty() &&
+                                    // ⚠ 跑完即可再跑：多片段的队列无论是否已全部落地都重跑
+                                    // 整批（runBatch 会把各行重置回 Waiting），不再用"是否
+                                    // 已跑完"去拦。
+                                    if (batchQueue.size > 1 ||
                                         batchQueue.any {
                                             it.state == BatchState.Waiting ||
                                             it.state == BatchState.Running
