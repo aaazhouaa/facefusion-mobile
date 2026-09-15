@@ -45,6 +45,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import com.facefusion.mobile.displayThumb
+import com.facefusion.mobile.scaleBoxesToThumb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
@@ -713,7 +714,25 @@ fun SwapScreen(
                 // `preview.original` itself keeps the full resolution for the pipeline
                 // and the output-size math below.
                 val originalDisplay = remember(preview.original) {
-                    preview.original?.displayThumb(256)?.first
+                    preview.original?.displayThumb(256)
+                }
+                // ⚠ The detector's boxes come from the FULL-resolution frame, but the tile
+                // draws the 256 px thumbnail above -- the boxes have to shrink by the same
+                // factor. Unscaled they were drawn at ~7x their true size and landed well
+                // outside the little square, so the overlay looked dead while its switch
+                // read as on.
+                val originalScale = originalDisplay?.second ?: 1f
+                val tileFaceBoxes = remember(preview.faceBoxes, originalScale) {
+                    preview.faceBoxes?.scaleBoxesToThumb(originalScale)
+                }
+                val tileReferenceBox = remember(preview.referenceBox, originalScale) {
+                    preview.referenceBox?.scaleBoxesToThumb(originalScale)
+                }
+                // A tap comes back in the thumbnail's coordinates (the tile hit-tests
+                // against the boxes above); the Activity resolves it against the
+                // full-resolution frame, so undo the scale before handing it over.
+                val tilePickFace = remember(onPickFace, originalScale) {
+                    { x: Float, y: Float -> onPickFace(x / originalScale, y / originalScale) }
                 }
                 FaceTile(
                     // The tile names what it holds: TARGET while asking for one, ORIGINAL once
@@ -721,7 +740,10 @@ fun SwapScreen(
                     // tile's badge is a 9 sp plate, and a clock string does not survive that.
                     label = stringResource(if (hasTarget) R.string.swap_pane_original
                                            else R.string.swap_pane_target),
-                    bitmap = originalDisplay,
+                    bitmap = originalDisplay?.first,
+                    // 瓦片画的是 256 px 缩略图（滚动不卡）；放大视图换成全分辨率帧，
+                    // 否则全屏后模糊。同一帧、同比例，框按宽度比换算。
+                    zoomBitmap = preview.original,
                     placeholder = stringResource(when {
                         run.preparing -> R.string.swap_reading_video
                         hasTarget -> R.string.swap_seeking
@@ -793,9 +815,9 @@ fun SwapScreen(
                     // The detector's boxes, already gated by MainActivity on the overlay
                     // switch, drawn over the tile's own frame; a tap on a face picks it
                     // as the reference (a miss still opens the target picker).
-                    faceBoxes = preview.faceBoxes,
-                    referenceBox = preview.referenceBox,
-                    onPickFace = if (showFaceBoxes && !assignMode && idle) onPickFace else null,
+                    faceBoxes = tileFaceBoxes,
+                    referenceBox = tileReferenceBox,
+                    onPickFace = if (showFaceBoxes && !assignMode && idle) tilePickFace else null,
                     // The stage chips used to stand on their own card above this row. They
                     // live behind this gear now: the stages act on the TARGET, so they sit
                     // beside the input they configure (and a fresh screen loses ~160 dp).
@@ -1458,10 +1480,12 @@ fun SwapScreen(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
                             // 片段 — 输出设置首项
+                            //
+                            // ⚠ 拖滑条时**不**淡出：右上角的起止时间在拖动中正起参考作用
+                            // （手指下面就是时间轴），淡掉它恰好把唯一能对照的数字藏了。
+                            // 滑条本体仍按聚焦态隐去，由下面的 Canvas 接手外观。
                             Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .alpha(if (trimScrubbing) 0f else 1f),
+                                Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(

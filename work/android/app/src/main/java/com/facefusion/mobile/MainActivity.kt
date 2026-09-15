@@ -501,6 +501,16 @@ class MainActivity : ComponentActivity() {
     private var playerNote by mutableStateOf<String?>(null)
     /** A seek is being resolved. The picture is stale and the sound is deliberately off. */
     private var playerSeeking by mutableStateOf(false)
+    /**
+     * 目标瓦片显示、人脸检测与选脸所用的帧，也是换脸预览的输入帧。
+     *
+     * 三者同一帧：瓦片画的框由检测器在这帧上算出，点框选脸也在这帧上解析坐标——
+     * 一旦不同步，框就会落在不是它检测的那张画面上。
+     *
+     * [onTrimChanged] 在片段滑条落定时 seek 并更新它，所以拖动滑条时目标瓦片跟着走；
+     * 拖动过程中的近似帧（[frameFast]）不写这里，只在落定的精确解码里更新，
+     * 所以瓦片按"落定"刷新（见 [onTrimChanged] 的 scrubJob）。
+     */
     private var originalFrame by mutableStateOf<Bitmap?>(null)
     private var swappedFrame by mutableStateOf<Bitmap?>(null)
     /**
@@ -518,16 +528,6 @@ class MainActivity : ComponentActivity() {
     /** [swappedFrame] 是否属于当前目标：版本戳不匹配即过期，窗格显示回落到 [preview]。 */
     private fun staleSwapped(): Boolean =
         swappedFrame != null && swappedFrameOwner != targetVersion
-    /**
-     * 目标窗格的固定帧。
-     *
-     * 目标加载后 [onTrimChanged] 会跟随"输出设置→片段"滑条 seek 并更新 [originalFrame]，
-     * 这曾把"添加目标"的缩略图也一起换掉——拖一下滑条，目标画面就变了。用户报告这是
-     * bug：滑条是输出范围选择器，不该动目标缩略图。所以 [originalFrame] 继续作为换脸
-     * 预览的输入帧（预览哪个时刻由滑条决定），而目标窗格显示 [paneFallback]——只在
-     * loadTarget/clearTarget 时设置，滑条永远不碰它。
-     */
-    private var paneFallback by mutableStateOf<Bitmap?>(null)
     private var previewWarm by mutableStateOf(false)
     private var previewBusy by mutableStateOf(false)
     private var previewNote by mutableStateOf<String?>(null)
@@ -1557,16 +1557,24 @@ class MainActivity : ComponentActivity() {
                 // at the shared g_pipe, so it must not be asked while a run owns it --
                 // `busy` covers that, and PipeGuard covers the API.
                 //
+                // ⚠ `previewBusy` is the same concern one level down, and it is new here:
+                // the tile follows the trim handle now, so every settled seek that redraws
+                // the preview also re-fires this effect -- and `detectFaces` shares g_pipe
+                // with the preview's swap WITHOUT taking PipeGuard, so the two would
+                // otherwise run concurrently on one model. While the preview holds the
+                // pipe the detector stands down and the boxes are simply absent; the
+                // effect re-runs when `previewBusy` clears and they appear then.
+                //
                 // ⚠ It also runs ONCE PER TARGET while the overlay is OFF, to answer "is
                 // there more than one face here". That question cannot be answered by the
                 // switch's initial value, because the detector has to have run first -- and
                 // it is exactly the question the user has when a second face is on screen.
                 // One yoloface pass, ~2 ms, and no identity work at all.
-                LaunchedEffect(paneFallback ?: originalFrame, showFaceBoxes, swapAssignMode,
-                               previewWarm, busy, targetVersion) {
-                    // 框画在窗格显示的画面上：窗格显示固定帧（paneFallback），框就必须
-                    // 是固定帧的框——用滑条当前帧检测的框画在首帧上会错位。
-                    val frame = paneFallback ?: originalFrame
+                LaunchedEffect(originalFrame, showFaceBoxes, swapAssignMode,
+                               previewWarm, previewBusy, busy, targetVersion) {
+                    // 框画在瓦片显示的画面上：瓦片画的就是 [originalFrame]（随滑条落定）
+                    // 这一帧，检测也必须跑在同一帧上，否则框会落在不是它检测的那张画面上。
+                    val frame = originalFrame
                     // The boxes belong to ONE frame. The moment the frame changes they are
                     // wrong, and being wrong on screen is worse than being absent -- so they
                     // go immediately, before anything below decides whether to recompute.
@@ -1575,7 +1583,7 @@ class MainActivity : ComponentActivity() {
                         faceBoxFrame = null
                     }
                     val decide = autoBoxTarget != targetVersion
-                    if (frame == null || !previewWarm || busy ||
+                    if (frame == null || !previewWarm || previewBusy || busy ||
                         (!showFaceBoxes && !decide)) {
                         if (!showFaceBoxes && !decide) faceBoxes = null
                         return@LaunchedEffect
@@ -1681,10 +1689,9 @@ class MainActivity : ComponentActivity() {
                                 targetH = targetH,
                                 fmt = ::fmt,
                                 preview = PreviewUi(
-                                    // 目标窗格显示固定帧（paneFallback，只在加载目标时
-                                    // 设置），不跟随"输出设置→片段"滑条 seek——滑条只
-                                    // 驱动换脸预览的输入帧（originalFrame）。
-                                    original = paneFallback ?: originalFrame,
+                                    // 目标瓦片显示 [originalFrame]——随"输出设置→片段"
+                                    // 滑条落定刷新，所以换到片子后半段才出现的脸也能选中。
+                                    original = originalFrame,
                                     // During a run the pane becomes the live output, which is
                                     // the same thing one frame later. It KEEPS that frame
                                     // after the run: the run invalidated the preview to hand
@@ -3051,9 +3058,6 @@ class MainActivity : ComponentActivity() {
                 // keepOutput（批量回退）时保留：结果窗格的画面属于输出文件，不属于目标。
                 if (!keepOutput) clearPreviewFrames()
                 originalFrame = previews.frameAt(0f)
-                // 目标窗格的固定帧 = 首帧。片段滑条 seek 的是 originalFrame，不碰这里，
-                // 所以"添加目标"的缩略图不随滑条变化。
-                paneFallback = originalFrame
                 // 保持显示：源脸已载入且管线热时，旧目标的预览刚被清掉（或即将因版本戳
                 // 被显示层作废），这里立刻为新目标重排一次刷新——冷管线会自动放弃，
                 // 不花模型重载；不调度则窗格要等一次手动 seek/刷新按钮才回内容。
@@ -3115,8 +3119,6 @@ class MainActivity : ComponentActivity() {
             if (!keepOutput) clearPreviewFrames()
             targetVersion++
             originalFrame = bmp
-            // 目标窗格的固定帧（见 paneFallback）：图片目标没有滑条，但语义一致。
-            paneFallback = bmp
             // 保持显示：同视频路径（见上）。图片目标的刷新走 warm 路径，成本低。
             if (sourceUri != null && previewWarm && !busy) refreshSwapped(force = false)
             status = getString(R.string.status_target_ready_image, bmp.width, bmp.height)
@@ -3709,8 +3711,6 @@ class MainActivity : ComponentActivity() {
         trimStartMs = 0f; trimEndMs = 0f
         targetAspect = 16f / 9f
         originalFrame = null
-        // 目标窗格的固定帧随目标一起清（队列清空路径也走这里）。
-        paneFallback = null
         targetVersion++
         // The frames, not the pipeline: a run's warm pipeline is the pane's fallback
         // (swappedFrame ?: preview) and must survive the row delete.
@@ -3741,8 +3741,8 @@ class MainActivity : ComponentActivity() {
         // face wins inside swapAll, so letting this gesture through would silently cut
         // the mode down to the single face it had picked.
         if (swapAssignMode) return
-        // 点击坐标相对窗格显示的画面（固定帧 paneFallback），框也是那帧的框。
-        val frame = paneFallback ?: originalFrame ?: return
+        // 点击坐标相对瓦片显示的画面（[originalFrame]，随滑条落定），框也是那帧的框。
+        val frame = originalFrame ?: return
         if (busy) return
         // ⚠ THIS USED TO RETURN SILENTLY, and that is the whole of the bug reported as
         // "after output is made i cant choose different face box unless i load the target

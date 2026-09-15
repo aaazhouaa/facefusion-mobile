@@ -3,10 +3,12 @@ package com.facefusion.mobile.ui
 import android.graphics.Bitmap
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
@@ -772,6 +774,7 @@ fun PreviewPane(
  * it, or [actionIcon] plus [placeholder] while empty -- and the icons stay reachable in
  * the strip below instead of floating on the picture.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FaceTile(
     label: String,
@@ -804,18 +807,37 @@ fun FaceTile(
      *  in the strip under the content; it carries its own sheet. */
     footer: (@Composable () -> Unit)? = null,
     /**
+     * 长按放大视图里用的图像，缺省用 [bitmap]。
+     *
+     * 瓦片画的是缩略图（目标瓦片 256 px，为了滚动不卡），放大到全屏后糊；
+     * 传进全分辨率的同一帧就能看清楚。两者是同一张图的不同分辨率，
+     * 比例相同，所以 [faceBoxes] 只需按宽度比一步换算。
+     */
+    zoomBitmap: Bitmap? = null,
+    /**
      * The one tile that stretches (the voice tile, when it carries a `weight`): its
      * content fills the tile's width instead of staying a fixed 72 dp square, so a long
      * voice name is not clipped by a square that is narrower than the surface.
      */
     stretch: Boolean = false,
 ) {
+    // 长按内容方块弹出的悬浮放大图。瓦片用 ContentScale.Crop（只显示中心、四边被裁），
+    // 靠边的人脸框会被切掉；悬浮层用 Fit 把整张图完整显示并画上框，被裁的部分连同
+    // 它的框一起可见。形态跟「选择源人脸」那个切换弹层一致：挂在瓦片下方、点外面关。
+    var zoomed by remember { mutableStateOf(false) }
+    // 锚点几何：弹层挂在瓦片正下方，需要瓦片自身的高度作 y 偏移（横向由 TopCenter 居中）。
+    var zoomAnchorH by remember { mutableStateOf(0) }
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(16.dp))
-            .background(MaterialTheme.colorScheme.surface),
+            .background(MaterialTheme.colorScheme.surface)
+            .onGloballyPositioned { zoomAnchorH = it.size.height },
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        // ⚠ NOT spacedBy: the zoom Popup at the bottom of this Column emits its own 0×0
+        // layout node into it, and spacedBy counts CHILDREN -- that phantom node bought
+        // a third slot, so the tile grew a gap and the whole card sank 4 dp whenever the
+        // popup showed. Explicit spacers keep the gap tied to the two visible children.
+        verticalArrangement = Arrangement.Top,
     ) {
         Box(
             Modifier
@@ -826,7 +848,19 @@ fun FaceTile(
                 // borderless, so the square reads as the input's own well.
                 .border(1.dp, MaterialTheme.colorScheme.outlineVariant,
                         RoundedCornerShape(16.dp))
-                .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+                .then(
+                    when {
+                        // 人脸选取会接管这个手势流（见内层处理），长按放大在那里顺带
+                        // 声明；这里不能也声明，否则两者会同时触发。
+                        onPickFace != null && bitmap != null -> Modifier
+                        bitmap != null -> Modifier.combinedClickable(
+                            onClick = { onClick?.invoke() },
+                            onLongClick = { zoomed = true },
+                        )
+                        onClick != null -> Modifier.clickable(onClick = onClick)
+                        else -> Modifier
+                    }
+                ),
             contentAlignment = Alignment.Center,
         ) {
             Box(
@@ -865,6 +899,9 @@ fun FaceTile(
                                         }
                                         if (!picked) onClick?.invoke()
                                     },
+                                    // 长按放大。声明在这里而不是外层：人脸选取已经接管
+                                    // 了这个手势流，外层再加一个会和它抢。
+                                    onLongPress = { zoomed = true },
                                 )
                             }
                         } else Modifier
@@ -945,6 +982,7 @@ fun FaceTile(
                 }
             }
         }
+        Spacer(Modifier.height(4.dp))
         // Every icon the tile owns, in one strip under the content. The picker trigger
         // (the source's list glyph, the voice's gear, the target's gear) leads, so every
         // tile reads settings first and delete last.
@@ -955,6 +993,133 @@ fun FaceTile(
             if (footer != null) footer()
             actions()
             bottomActions()
+        }
+
+        if (zoomed && bitmap != null && zoomAnchorH > 0) {
+            // 悬浮放大图，挂在瓦片正下方、横向居中——形态跟「选择源人脸」那个切换弹层
+            // 一样（点外面关）。瓦片用 Crop，靠边的内容连同它的脸框被裁掉；这层用 Fit
+            // 把整张图完整显示，被裁的部分也在。
+            //
+            // 交互只保留一件事：点人脸框选脸。点空白**不**做任何事——尤其不能把点击
+            // 交给瓦片的 onClick，那会在放大图上误触「更换目标/更换视频」。关闭靠点卡片
+            // 外面（Popup 自带的 onDismissRequest）。
+            //
+            // 声明在 Column 里面（而不是 FaceTile 根下）：Popup 的 alignment 是相对
+            // 它的父布局节点，放在根下会锚到外层整行，TopCenter 就变成"居中于所有
+            // 输入瓦片"而不是本瓦片。
+            val zoomBmp = zoomBitmap ?: bitmap
+            // 框在 [bitmap] 的坐标系里；换成更清的 [zoomBitmap] 后按宽度比换算。两者同帧、
+            // 比例相同（缩略图由该帧等比缩小而来），所以一个标量就够。
+            val boxScale = if (bitmap.width > 0) zoomBmp.width.toFloat() / bitmap.width else 1f
+            val density = LocalDensity.current
+            // 长边封顶，免得竖图竖出屏、横图横出屏；比例照原图。
+            val maxEdgeDp = 280f
+            val aspect = if (zoomBmp.height > 0)
+                             zoomBmp.width.toFloat() / zoomBmp.height else 1f
+            val boxW = if (aspect >= 1f) maxEdgeDp.dp else (maxEdgeDp * aspect).dp
+            val boxH = if (aspect >= 1f) (maxEdgeDp / aspect).dp else maxEdgeDp.dp
+            Popup(
+                // TopCenter 以瓦片为准：横向自动居中，y 只需往下拉到瓦片下方。
+                alignment = Alignment.TopCenter,
+                offset = IntOffset(0, zoomAnchorH + with(density) { 3.dp.roundToPx() }),
+                onDismissRequest = { zoomed = false },
+                properties = PopupProperties(focusable = true),
+            ) {
+                Box(
+                    Modifier
+                        .size(boxW, boxH)
+                        .shadow(12.dp, RoundedCornerShape(16.dp))
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant,
+                                RoundedCornerShape(16.dp))
+                        .then(
+                            // 手写识别，不用 detectTapGestures：后者首枚 down 走
+                            // requireUnconsumed = true，而 Popup 自带的"点外面关"探测会在
+                            // 下行阶段先消费掉 down（同一弹层里的 clickable 能用，正是因为
+                            // 它用 requireUnconsumed = false；本项目的 HintIcon 也为此手写
+                            // 了循环）。detectTapGestures 的结果是点框毫无反应。
+                            if (onPickFace != null && faceBoxes != null &&
+                                faceBoxes.size >= 5) {
+                                Modifier.pointerInput(onPickFace, faceBoxes, zoomBmp, boxScale) {
+                                    awaitEachGesture {
+                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                        val slop = viewConfiguration.touchSlop
+                                        var tapPos: Offset? = null
+                                        while (true) {
+                                            val ev = awaitPointerEvent()
+                                            val change = ev.changes.firstOrNull { it.id == down.id }
+                                                ?: break
+                                            if (!change.pressed) { tapPos = change.position; break }
+                                            if ((change.position - down.position).getDistance() > slop)
+                                                break
+                                        }
+                                        val tap = tapPos ?: return@awaitEachGesture
+                                        val iw = zoomBmp.width.toFloat()
+                                        val ih = zoomBmp.height.toFloat()
+                                        if (iw <= 0f || ih <= 0f) return@awaitEachGesture
+                                        // Fit，与绘制同一反变换：屏幕 → zoomBmp 像素 →
+                                        // bitmap 像素（faceBoxes 的坐标系）。
+                                        val k = minOf(size.width / iw, size.height / ih)
+                                        val ox = (size.width - iw * k) / 2f
+                                        val oy = (size.height - ih * k) / 2f
+                                        val bx = ((tap.x - ox) / k) / boxScale
+                                        val by = ((tap.y - oy) / k) / boxScale
+                                        for (i in 0 until faceBoxes.size / 5) {
+                                            val b = i * 5
+                                            if (bx >= faceBoxes[b] && bx <= faceBoxes[b + 2] &&
+                                                by >= faceBoxes[b + 1] && by <= faceBoxes[b + 3]) {
+                                                // 与瓦片交给 Activity 的同一套坐标。
+                                                onPickFace(bx, by)
+                                                return@awaitEachGesture
+                                            }
+                                        }
+                                        // 没点中：什么也不做。这层只用于选脸，不能把点击
+                                        // 交给瓦片的 onClick（那会误触换目标/换视频）。
+                                    }
+                                }
+                            } else Modifier
+                        ),
+                ) {
+                    val image = remember(zoomBmp) { zoomBmp.asImageBitmap() }
+                    Image(
+                        image, label,
+                        Modifier.fillMaxSize(),
+                        // Fit, never Crop: 要看的就是 Crop 藏起来的那部分。
+                        contentScale = ContentScale.Fit,
+                    )
+                    if (faceBoxes != null && faceBoxes.size >= 5) {
+                        Canvas(Modifier.fillMaxSize()) {
+                            val iw = zoomBmp.width.toFloat()
+                            val ih = zoomBmp.height.toFloat()
+                            if (iw > 0f && ih > 0f) {
+                                // Fit，与上面的 Image 同一比例：取较小比值、两轴居中。
+                                val k = minOf(size.width / iw, size.height / ih)
+                                val ox = (size.width - iw * k) / 2f
+                                val oy = (size.height - ih * k) / 2f
+                                val w = 2.dp.toPx()
+                                for (i in 0 until faceBoxes.size / 5) {
+                                    val b = i * 5
+                                    val chosen = referenceBox != null &&
+                                        referenceBox.size >= 4 &&
+                                        kotlin.math.abs(referenceBox[0] - faceBoxes[b]) < 1f &&
+                                        kotlin.math.abs(referenceBox[1] - faceBoxes[b + 1]) < 1f
+                                    drawRect(
+                                        color = if (chosen) FfRed
+                                                else FfRed.copy(alpha =
+                                                    if (referenceBox != null) 0.35f else 1f),
+                                        topLeft = Offset(ox + faceBoxes[b] * boxScale * k,
+                                                         oy + faceBoxes[b + 1] * boxScale * k),
+                                        size = Size((faceBoxes[b + 2] - faceBoxes[b]) * boxScale * k,
+                                                    (faceBoxes[b + 3] - faceBoxes[b + 1]) * boxScale * k),
+                                        style = Stroke(width = if (chosen) w * 2f else w),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
