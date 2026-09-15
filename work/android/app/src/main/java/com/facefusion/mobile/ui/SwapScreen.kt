@@ -1853,28 +1853,32 @@ fun SwapScreen(
                 floating = false,
                 trailing = {
             if (hasOutput && !outputAutoSaved) {
-                // The batch's save-all state, derived from the queue itself: the entry
-                // lights up only when EVERY clip finished, goes dim and dead once the
-                // gallery holds them all, and comes back when the next run resets the
-                // queue. A single run (empty queue) keeps the old save-current behaviour.
+                // 保存入口的可性由"是否有尚未保存的已完成输出"决定，而不是"整批是否全部成功"：
+                // 批量里被内容检查拒检、失败或取消的片段，不该把已经成功的那些一起锁死。
+                // 之前要求 EVERY row 都是 Done，因此只要有一行没跑成，图标就永久变灰。
                 val doneItems = batch.filter { it.state == BatchState.Done }
-                val allBatchDone = batch.isNotEmpty() && doneItems.size == batch.size
-                val allBatchSaved = doneItems.isNotEmpty() &&
-                        doneItems.all { it.savedUri != null }
-                val batchSaveAllReady = allBatchDone && !allBatchSaved && !savingAll
-                val batchMode = batch.isNotEmpty()
+                val anyUnsavedRow = doneItems.any { it.savedUri == null }
+                // 队列里还有 Waiting/Running 时不算"跑完"，不放开保存全部（与旧行为一致）。
+                val runSettled = batch.none {
+                    it.state == BatchState.Waiting || it.state == BatchState.Running
+                }
+                // 走 runSwap 的单个运行不会留下 Done 行，这时要保存的是窗格自己的输出。
+                val paneUnsaved = outputFile != null && !saved &&
+                                  batch.none { it.output == outputFile }
+                val saveAll = anyUnsavedRow
+                val saveReady = !savingAll &&
+                                ((anyUnsavedRow && runSettled) || paneUnsaved) &&
+                                (idle || run.canCancel)
                 IconButton(
-                    onClick = { if (batchMode) onSaveAll() else onSave() },
-                    enabled = if (batchMode) batchSaveAllReady else (idle || run.canCancel),
+                    onClick = { if (saveAll) onSaveAll() else onSave() },
+                    enabled = saveReady,
                     modifier = Modifier.size(26.dp),
                 ) {
                     // ⚠ Explicit tint: a disabled IconButton multiplies the inherited
                     // colour by Compose's own disabled alpha (0.38), which would stack
                     // with ours. Enabled reads onSurfaceVariant like every other icon;
                     // disabled is a fixed colour at exactly 31% so the dim stays honest.
-                    val tint = if (batchMode && !batchSaveAllReady)
-                                   MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.31f)
-                               else if (idle || run.canCancel)
+                    val tint = if (saveReady)
                                    MaterialTheme.colorScheme.onSurfaceVariant
                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.31f)
                     HintIcon(stringResource(R.string.swap_save_to_gallery)) {
