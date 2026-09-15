@@ -437,8 +437,15 @@ android {
         // 87 = the band's missing gap under its own divider, and the run preview at the
         // rate the NPU can actually feed it.
         // 88 = an optional model that is absent by design stopped logging at ERROR.
-        versionCode = 96
-        versionName = "0.9.24$variantTag"    // "-dev" == NO content gate
+        // 97 = the non-Qualcomm GPU path checks its own Vulkan against its own CPU before
+        // placing anything on it, and the per-frame encoder feed stopped trusting one
+        // encoder's buffer arithmetic. v0.9.24 is published and is versionCode 96, so this
+        // build has stopped being that release and must stop answering to its name.
+        // 98 = `--es unit auto|gpu|cpu`, so the ncnn unit pin can be driven from a script.
+        // 97 is installed on the bench and sitting in its Downloads: reusing the name would
+        // leave two builds answering to it, which is the ambiguity the rule exists to stop.
+        versionCode = 98
+        versionName = "0.9.26$variantTag"    // "-dev" == NO content gate
         setProperty("archivesBaseName", "facefusion-mobile-$versionName")
         manifestPlaceholders["appLabel"] = appLabel
         ndk { abiFilters += "arm64-v8a" }
