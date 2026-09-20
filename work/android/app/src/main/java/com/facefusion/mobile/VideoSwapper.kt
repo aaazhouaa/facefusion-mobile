@@ -434,7 +434,8 @@ class VideoSwapper(
         // The last output slot already written, for rate conversion. -1 so slot 0 is free.
         var lastSlot = -1L
 
-        while (!sawDecodeEOS) {
+        try {
+            while (!sawDecodeEOS) {
             // Checked before the work, not after, so pressing Cancel stops the next frame
             // rather than finishing it first.
             if (isCancelled()) {
@@ -588,23 +589,33 @@ class VideoSwapper(
             }
         }.onFailure { onLog("audio: copy-through failed (${it.javaClass.simpleName}), video kept") }
 
-        decoder.stop(); decoder.release()
-        encoder.stop(); encoder.release()
-        muxer.stop(); muxer.release()
-        extractor.release()
-        if (audioExtractor !== extractor) audioExtractor.release()
-        NativePipe.setTrackPeriod(0)
-        onLog((if (cancelled) "partial: " else "") +
-              "wrote ${File(outputPath).length() / 1024} KB, $swapped frames")
-        // The headline number, spelled out rather than left to be divided out of the stage
-        // list: this is what a report says when someone is asked how fast it ran.
-        val elapsedMs = System.currentTimeMillis() - runStartMs
-        if (swapped > 0 && elapsedMs > 0)
-            onLog("%.1f fps  (%.1f ms/frame, %d frames in %.1fs)"
-                .format(swapped * 1000.0 / elapsedMs, elapsedMs.toDouble() / swapped,
-                        swapped, elapsedMs / 1000.0))
-        NativePipe.stageMillis().takeIf { it.isNotEmpty() }?.let(onLog)
-        outputPath
+            decoder.stop(); decoder.release()
+            encoder.stop(); encoder.release()
+            muxer.stop(); muxer.release()
+            extractor.release()
+            if (audioExtractor !== extractor) audioExtractor.release()
+            NativePipe.setTrackPeriod(0)
+            onLog((if (cancelled) "partial: " else "") +
+                  "wrote ${File(outputPath).length() / 1024} KB, $swapped frames")
+            // The headline number, spelled out rather than left to be divided out of the stage
+            // list: this is what a report says when someone is asked how fast it ran.
+            val elapsedMs = System.currentTimeMillis() - runStartMs
+            if (swapped > 0 && elapsedMs > 0)
+                onLog("%.1f fps  (%.1f ms/frame, %d frames in %.1fs)"
+                    .format(swapped * 1000.0 / elapsedMs, elapsedMs.toDouble() / swapped,
+                            swapped, elapsedMs / 1000.0))
+            NativePipe.stageMillis().takeIf { it.isNotEmpty() }?.let(onLog)
+            outputPath
+        } finally {
+            runCatching { decoder.stop() }
+            runCatching { decoder.release() }
+            runCatching { encoder.stop() }
+            runCatching { encoder.release() }
+            runCatching { muxer.release() }
+            runCatching { extractor.release() }
+            if (audioExtractor !== extractor) runCatching { audioExtractor.release() }
+            NativePipe.setTrackPeriod(0)
+        }
     }
 
     /** One encoded AAC frame, held until the muxer has a track to take it. */

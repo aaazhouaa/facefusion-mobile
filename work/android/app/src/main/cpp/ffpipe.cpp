@@ -1302,7 +1302,6 @@ int Pipeline::Impl::sourceForFace(const Face& f, size_t fi, size_t faceCount,
     for (auto& a : faceAssignments) {
       if (!a.keepOriginal &&
           (a.source < 0 || a.source >= (int)sourceSlots.size())) continue;
-      if (a.hasBox) continue;   // already handled above; a boxed entry does not re-match by id
       const float d = faceDistance(f.embeddingNorm, a.embedding.data());
       if (d < bestD) { bestD = d; best = &a; }
     }

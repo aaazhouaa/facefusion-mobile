@@ -848,7 +848,7 @@ class MainActivity : ComponentActivity() {
                 status = getString(R.string.swap_assign_failed, person + 1)
                 return@launch
             }
-            swapSelectedPerson = person
+            swapSelectedPerson = -1
             swapBrushKeepOriginal = keepOriginal
             swapPersonAssignments = swapPersonAssignments +
                 (person to if (keepOriginal) KEEP_ORIGINAL else source)
@@ -914,6 +914,8 @@ class MainActivity : ComponentActivity() {
      */
     private fun restoreSwapAssignments(): Int {
         if (!swapAssignMode) return 0
+        NativePipe.clearFaceSourceAssignments()
+        NativePipe.setFaceAssignEnabled(true)
         var n = 0
         for ((person, slot) in swapPersonAssignments) {
             val full = swapPersonIdentity[person] ?: continue
@@ -2631,6 +2633,8 @@ class MainActivity : ComponentActivity() {
      *    in the one path that did not call it.
      */
     private fun clearPreviewFrames() {
+        refreshJob?.cancel()
+        refreshJob = null
         droppedSwappedFrameJob?.cancel()
         droppedSwappedFrameJob = null
         droppedSwappedFrame = null
@@ -2904,9 +2908,11 @@ class MainActivity : ComponentActivity() {
                         return@launch
                     }
                     previewWarm = true
-                    // ⚠ AFTER the init, every time. Native assignments live on the
-                    // pipeline and do not survive one being built, so a mode that is on
-                    // would come back empty and silently swap everybody.
+                }
+
+                // Push current per-person assignments to the warm pipeline before previewing,
+                // so subsequent assignments don't clobber earlier ones on screen.
+                if (swapAssignMode) {
                     restoreSwapAssignments()
                 }
 
