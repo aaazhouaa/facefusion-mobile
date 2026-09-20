@@ -69,7 +69,8 @@ class MainActivity : ComponentActivity() {
      * The two screens differ only in which slot each is pointing at, which is what
      * [swapSourceIndex] and [liveSourceIndex] are.
      */
-    private var sources by mutableStateOf<List<SourceItem>>(emptyList())
+    private var swapSources by mutableStateOf<List<SourceItem>>(emptyList())
+    private var liveSources by mutableStateOf<List<SourceItem>>(emptyList())
     private var swapSourceIndex by mutableIntStateOf(0)
     private var liveSourceIndex by mutableIntStateOf(0)
 
@@ -82,8 +83,8 @@ class MainActivity : ComponentActivity() {
      * renumbers everything above it. A fact kept twice is a fact that can disagree with
      * itself; this one is cheap enough to just read.
      */
-    private val sourceUri: Uri? get() = sources.getOrNull(swapSourceIndex)?.uri
-    private val sourceThumb: Bitmap? get() = sources.getOrNull(swapSourceIndex)?.thumb
+    private val sourceUri: Uri? get() = swapSources.getOrNull(swapSourceIndex)?.uri
+    private val sourceThumb: Bitmap? get() = swapSources.getOrNull(swapSourceIndex)?.thumb
 
     // ---- Assign per person, on the SWAP screen (Live has its own, below).
     //
@@ -652,44 +653,43 @@ class MainActivity : ComponentActivity() {
      * list exists to prevent, arriving by way of a convenience button.
      */
     private fun setSourceFrom(uri: Uri) {
-        val at = addToSources(uri) ?: return
+        val at = addToSwapSources(uri) ?: return
         swapSourceIndex = at
-        liveSourceIndex = at
         swapBrushKeepOriginal = false
         // A different face means the loaded pipeline is holding the wrong embedding.
         previewOptionsChanged()
     }
 
     /**
-     * Put [uri] in [sources] if it is not already there, and say which slot it is.
+     * Put [uri] in [swapSources] if it is not already there, and say which slot it is.
      *
-     * The ONE place the list grows. Null when the image cannot be decoded -- and the
+     * The ONE place the swap list grows. Null when the image cannot be decoded -- and the
      * caller is told, because a picker that visibly does nothing is the bug report.
      */
-    private fun addToSources(uri: Uri): Int? {
-        val existing = sources.indexOfFirst { it.uri == uri }
+    private fun addToSwapSources(uri: Uri): Int? {
+        val existing = swapSources.indexOfFirst { it.uri == uri }
         if (existing >= 0) return existing
         val thumb = decodeOriented(uri) ?: run {
             status = getString(R.string.status_cannot_read_source)
             return null
         }
-        sources = sources + SourceItem(uri, thumb)
-        return sources.lastIndex
+        swapSources = swapSources + SourceItem(uri, thumb)
+        return swapSources.lastIndex
     }
 
     /**
-     * Remove one source, from either screen, and leave every index that named it right.
+     * Remove one source from Swap screen, and leave every index that named it right.
      *
-     * ⚠ Slots are named by INDEX everywhere -- the two screens' selections, every stored
+     * ⚠ Slots are named by INDEX everywhere -- the screen's selection, every stored
      * per-person assignment, and `setActiveSource` natively -- so a removal RENUMBERS the
      * ones above it. A person assigned to the slot that went away loses their assignment;
      * a person above it keeps theirs, one lower. "Keep the original face" survives either
      * way: it indexes nothing, and the person was excluded regardless of how many sources
      * are left.
      */
-    private fun removeSource(index: Int) {
-        if (index !in sources.indices) return
-        sources = sources.filterIndexed { i, _ -> i != index }
+    private fun removeSwapSource(index: Int) {
+        if (index !in swapSources.indices) return
+        swapSources = swapSources.filterIndexed { i, _ -> i != index }
         swapPersonAssignments = swapPersonAssignments.mapNotNull { (person, slot) ->
             when {
                 slot == index -> null
@@ -699,10 +699,9 @@ class MainActivity : ComponentActivity() {
         }.toMap()
         swapPersonIdentity = swapPersonIdentity.filterKeys { it in swapPersonAssignments }
         fun shift(i: Int) = (if (i > index) i - 1 else i)
-            .coerceIn(0, sources.lastIndex.coerceAtLeast(0))
+            .coerceIn(0, swapSources.lastIndex.coerceAtLeast(0))
         swapSourceIndex = shift(swapSourceIndex)
-        liveSourceIndex = shift(liveSourceIndex)
-        if (sources.isEmpty()) {
+        if (swapSources.isEmpty()) {
             resetSwapAssign()
             status = ""
         }
@@ -716,16 +715,16 @@ class MainActivity : ComponentActivity() {
     )
 
     /**
-     * Decode every source in [sources] and convert it for the pipeline. Null if any of
+     * Decode every source in [swapSources] and convert it for the pipeline. Null if any of
      * them cannot be read -- a partial list would register faces at the wrong slots.
      *
      * Decoding is not processing, so this needs no pipeline and carries no check. The
      * check is [gateSources], which runs against the bitmaps this returns.
      */
     private fun prepareSources(): PreparedSources? {
-        if (sources.isEmpty()) return null
-        val bitmaps = sources.map { decodeOriented(it.uri) ?: return null }
-        val slots = sources.zip(bitmaps).map { (item, bmp) ->
+        if (swapSources.isEmpty()) return null
+        val bitmaps = swapSources.map { decodeOriented(it.uri) ?: return null }
+        val slots = swapSources.zip(bitmaps).map { (item, bmp) ->
             val soft = bmp.asArgb8888() ?: return null
             val px = IntArray(soft.width * soft.height)
             soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
@@ -796,7 +795,7 @@ class MainActivity : ComponentActivity() {
      * gated slot is active processes nothing new.
      */
     private fun selectSwapSource(index: Int) {
-        if (index !in sources.indices) return
+        if (index !in swapSources.indices) return
         swapBrushKeepOriginal = false
         swapSourceIndex = index
         if (previewWarm) NativePipe.setActiveSource(index)
@@ -823,7 +822,7 @@ class MainActivity : ComponentActivity() {
      */
     private fun assignSwapPerson(person: Int, source: Int, keepOriginal: Boolean) {
         if (!swapAssignMode || person !in swapPersonThumbs.indices) return
-        if (!keepOriginal && source !in sources.indices) return
+        if (!keepOriginal && source !in swapSources.indices) return
         if (!previewWarm) {
             // Nothing to assign ON. Said out loud, because the alternative is a tap that
             // silently does nothing while the pipeline is still coming up.
@@ -951,7 +950,7 @@ class MainActivity : ComponentActivity() {
      * nothing is registered yet and startLive's loop is still the check.
      */
     private fun addLiveSource(uri: Uri) {
-        val already = sources.indexOfFirst { it.uri == uri }
+        val already = liveSources.indexOfFirst { it.uri == uri }
         if (already >= 0) { selectLiveSource(already); return }
         // ONE decode, two uses: the thumbnail stored for the pane and the pixels handed
         // to the pipeline are the same image -- a second decode is a full-size allocation
@@ -960,8 +959,8 @@ class MainActivity : ComponentActivity() {
             liveNote = getString(R.string.status_cannot_read_source); return
         }
         if (!liveRunning) {
-            sources = sources + SourceItem(uri, bmp)
-            liveSourceIndex = sources.lastIndex
+            liveSources = liveSources + SourceItem(uri, bmp)
+            liveSourceIndex = liveSources.lastIndex
             return
         }
         lifecycleScope.launch {
@@ -980,13 +979,13 @@ class MainActivity : ComponentActivity() {
                 else null
             }
             if (refusal != null) { liveNote = refusal; return@launch }
-            sources = sources + SourceItem(uri, bmp)
-            selectLiveSource(sources.lastIndex)
+            liveSources = liveSources + SourceItem(uri, bmp)
+            selectLiveSource(liveSources.lastIndex)
         }
     }
 
     private fun selectLiveSource(index: Int) {
-        if (index !in sources.indices) return
+        if (index !in liveSources.indices) return
         // ⚠ The brush is cleared BEFORE the no-op check, never after. Selecting "keep the
         // original" and then tapping the source that was already active is the one way
         // back, and an early return above this line made it the one way that did nothing.
@@ -1006,9 +1005,17 @@ class MainActivity : ComponentActivity() {
         if (liveRunning) NativePipe.setSelectedFaceKeepOriginal(true)
     }
 
+    private fun removeLiveSource(index: Int) {
+        if (index !in liveSources.indices) return
+        liveSources = liveSources.filterIndexed { i, _ -> i != index }
+        liveSourceIndex = (if (liveSourceIndex > index) liveSourceIndex - 1 else liveSourceIndex)
+            .coerceIn(0, liveSources.lastIndex.coerceAtLeast(0))
+        if (liveRunning) NativePipe.setActiveSource(liveSourceIndex)
+    }
+
     private fun clearLiveSource() {
-        if (liveRunning || sources.isEmpty()) return
-        removeSource(liveSourceIndex)
+        if (liveRunning || liveSources.isEmpty()) return
+        removeLiveSource(liveSourceIndex)
     }
 
     /**
@@ -1018,9 +1025,8 @@ class MainActivity : ComponentActivity() {
      * has to follow the removal while running.
      */
     private fun deleteLiveSource(index: Int) {
-        if (index !in sources.indices || liveRunning) return
-        removeSource(index)
-        if (liveRunning) NativePipe.setActiveSource(liveSourceIndex)
+        if (index !in liveSources.indices || liveRunning) return
+        removeLiveSource(index)
     }
 
     private val takeSourcePhoto = registerForActivityResult(
@@ -1687,7 +1693,7 @@ class MainActivity : ComponentActivity() {
                             Screen.Swap -> tabState.SaveableStateProvider(Screen.Swap.name) {
                                 SwapScreen(
                                 sourceThumb = sourceThumb,
-                                sourceThumbs = sources.map { it.thumb },
+                                sourceThumbs = swapSources.map { it.thumb },
                                 activeSource = swapSourceIndex,
                                 onSelectSource = ::selectSwapSource,
                                 assignMode = swapAssignMode,
@@ -1904,9 +1910,9 @@ class MainActivity : ComponentActivity() {
 
                             Screen.Live -> tabState.SaveableStateProvider(Screen.Live.name) {
                                 LiveScreen(
-                                sourceThumb = sources.getOrNull(liveSourceIndex)?.thumb,
-                                sourceThumbs = sources.map { it.thumb },
-                                sourceCount = sources.size,
+                                sourceThumb = liveSources.getOrNull(liveSourceIndex)?.thumb,
+                                sourceThumbs = liveSources.map { it.thumb },
+                                sourceCount = liveSources.size,
                                 activeSource = liveSourceIndex,
                                 onSelectSource = ::selectLiveSource,
                                 onDeleteSource = ::deleteLiveSource,
@@ -3518,8 +3524,8 @@ class MainActivity : ComponentActivity() {
      * the output it does not confirm.
      */
     private fun clearSource() {
-        if (sources.isEmpty()) return
-        removeSource(swapSourceIndex)
+        if (swapSources.isEmpty()) return
+        removeSwapSource(swapSourceIndex)
     }
 
     private fun clearTarget() {
@@ -3988,7 +3994,7 @@ class MainActivity : ComponentActivity() {
     private fun startLive() {
         // Nothing to run with -- the guard the caller's button already relies on, kept so
         // this method cannot be entered with an empty list by any other path.
-        if (sources.getOrNull(liveSourceIndex) == null) return
+        if (liveSources.getOrNull(liveSourceIndex) == null) return
         // Read at bind time by the engine, so it must be set before start() and not after.
         live.frontCamera = liveFrontCamera
         lifecycleScope.launch {
@@ -4020,7 +4026,7 @@ class MainActivity : ComponentActivity() {
                 // nowhere at all -- as soon as the list held more than one face.
                 // Each one is gated too: a face the user can switch to mid-run must not
                 // be the one input the gate never saw.
-                for ((i, ls) in sources.withIndex()) {
+                for ((i, ls) in liveSources.withIndex()) {
                     val bmp = decodeOriented(ls.uri)
                         ?: return@withContext "cannot read source ${i + 1}"
                     val verdict = ContentGate.checkImage(bmp)
@@ -4170,7 +4176,7 @@ class MainActivity : ComponentActivity() {
      * clip, is the same answer for both and neither is the weaker door.
      */
     private fun startPlayer() {
-        if (sources.isEmpty()) return
+        if (swapSources.isEmpty()) return
         val tgt = targetFile ?: return
         lifecycleScope.launch {
             if (!PipeGuard.acquire("player", 5000)) {
