@@ -1812,11 +1812,7 @@ class MainActivity : ComponentActivity() {
                                     // ⚠ 跑完即可再跑：多片段的队列无论是否已全部落地都重跑
                                     // 整批（runBatch 会把各行重置回 Waiting），不再用"是否
                                     // 已跑完"去拦。
-                                    if (batchQueue.size > 1 ||
-                                        batchQueue.any {
-                                            it.state == BatchState.Waiting ||
-                                            it.state == BatchState.Running
-                                        }) runBatch() else runSwap()
+                                    if (batchQueue.size > 1) runBatch() else runSwap()
                                 },
                                 batch = batchQueue,
                                 batchAutoSave = opts.batchAutoSave,
@@ -4621,23 +4617,18 @@ class MainActivity : ComponentActivity() {
                     if (!ok) error("init: " + NativePipe.lastError())
 
                     status = getString(R.string.status_reading_source)
-                    val bmp = decodeOriented(src) ?: error("cannot decode source image")
+                    val prepared = prepareSources() ?: error("cannot decode source image")
                     if (!ContentGate.logoBarVisible)
                         status = getString(R.string.status_content_check)
-                    ContentGate.checkImage(bmp).let {
-                        appendLog("source content score %+.3f".format(it.score))
-                        if (!it.ok) throw ContentGate.Refused(
-                            ContentGate.message(this@MainActivity,
-                                                R.string.gate_subject_source_image, it))
-                    }
-                    val soft = bmp.asArgb8888()
-                    val px = IntArray(soft.width * soft.height)
-                    soft.getPixels(px, 0, soft.width, 0, 0, soft.width, soft.height)
-                    if (!NativePipe.setSource(
-                            NativePipe.argbToBgr(px, soft.width, soft.height),
-                            soft.width, soft.height))
-                        error("source: " + NativePipe.lastError())
-                    appendLog("source ready for " + batchQueue.size + " clips")
+                    gateSources(prepared.bitmaps, "batch")?.let { throw ContentGate.Refused(it) }
+
+                    registerSources(prepared)?.let { error(it) }
+                    val restored = restoreSwapAssignments()
+                    appendLog("source ready (${prepared.slots[0].width}x" +
+                              "${prepared.slots[0].height}, ${prepared.slots.size} source" +
+                              (if (prepared.slots.size == 1) "" else "s") +
+                              (if (restored > 0) ", $restored assigned" else "") +
+                              ") for " + batchQueue.size + " clips")
                 }
             }
             if (setup.isFailure) {
