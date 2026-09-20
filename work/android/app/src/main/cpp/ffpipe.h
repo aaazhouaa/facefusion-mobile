@@ -246,6 +246,10 @@ class Pipeline {
   /** Put a remembered identity's assignment back on a pipeline that was just built. */
   bool restoreFaceAssignment(const float* embedding, int sourceIndex, bool keepOriginal);
 
+  /** The same restore, carrying the box the identity was picked from. */
+  bool restoreFaceAssignmentAt(const float* embedding, int sourceIndex, bool keepOriginal,
+                               const float* box);
+
   void clearFaceSourceAssignments();
 
   /**

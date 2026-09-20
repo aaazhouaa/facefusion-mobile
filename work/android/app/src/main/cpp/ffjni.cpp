@@ -292,13 +292,20 @@ Java_com_facefusion_mobile_NativePipe_assignFaceAt(JNIEnv* env, jclass,
   }
   env->GetByteArrayRegion(jBgr, 0, (jsize)img.data.size(), (jbyte*)img.data.data());
   float embedding[512] = {0};
+  float box[4] = {0};
   if (!g_pipe->setFaceSourceAt(img, x, y, (int)source, keepOriginal == JNI_TRUE,
-                               nullptr, embedding)) {
+                               box, embedding)) {
     g_err = g_pipe->error();
     return env->NewFloatArray(0);
   }
-  jfloatArray out = env->NewFloatArray(512);
-  if (out) env->SetFloatArrayRegion(out, 0, 512, embedding);
+  // 512 embedding floats + 4 box floats, so Kotlin can keep BOTH. The box is what lets
+  // an assignment be re-applied to the right face after a pipeline rebuild -- three
+  // copies of one face share an embedding, so the embedding alone is ambiguous.
+  jfloatArray out = env->NewFloatArray(516);
+  if (out) {
+    env->SetFloatArrayRegion(out, 0, 512, embedding);
+    env->SetFloatArrayRegion(out, 512, 4, box);
+  }
   return out;
 }
 
@@ -317,6 +324,36 @@ Java_com_facefusion_mobile_NativePipe_restoreFaceAssignment(JNIEnv* env, jclass,
   env->GetFloatArrayRegion(jEmbedding, 0, 512, embedding);
   if (!g_pipe->restoreFaceAssignment(embedding, (int)source,
                                      keepOriginal == JNI_TRUE)) {
+    g_err = g_pipe->error();
+    return JNI_FALSE;
+  }
+  return JNI_TRUE;
+}
+
+// The same restore, but with the box the identity was picked from. Three copies of one
+// face share an embedding, so after a pipeline rebuild the box is the only thing that
+// puts the assignment back on the right copy.
+JNIEXPORT jboolean JNICALL
+Java_com_facefusion_mobile_NativePipe_restoreFaceAssignmentAt(JNIEnv* env, jclass,
+                                                              jfloatArray jEmbedding,
+                                                              jint source,
+                                                              jboolean keepOriginal,
+                                                              jfloatArray jBox) {
+  if (!g_pipe) { g_err = "pipeline not initialised"; return JNI_FALSE; }
+  if (!jEmbedding || env->GetArrayLength(jEmbedding) != 512) {
+    g_err = "restoreFaceAssignmentAt: embedding is not 512 floats";
+    return JNI_FALSE;
+  }
+  if (!jBox || env->GetArrayLength(jBox) != 4) {
+    g_err = "restoreFaceAssignmentAt: box is not 4 floats";
+    return JNI_FALSE;
+  }
+  float embedding[512] = {0};
+  float box[4] = {0};
+  env->GetFloatArrayRegion(jEmbedding, 0, 512, embedding);
+  env->GetFloatArrayRegion(jBox, 0, 4, box);
+  if (!g_pipe->restoreFaceAssignmentAt(embedding, (int)source,
+                                       keepOriginal == JNI_TRUE, box)) {
     g_err = g_pipe->error();
     return JNI_FALSE;
   }

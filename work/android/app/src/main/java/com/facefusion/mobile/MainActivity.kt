@@ -99,11 +99,12 @@ class MainActivity : ComponentActivity() {
     /** person index -> source slot, or [KEEP_ORIGINAL]. */
     private var swapPersonAssignments by mutableStateOf<Map<Int, Int>>(emptyMap())
     /**
-     * person index -> their 512-float identity.
+     * person index -> their 512-float identity PLUS the 4-float box it was picked from
+     * (516 floats total).
      *
-     * ⚠ Kept in Kotlin because pressing Swap builds a FRESH pipeline and every assignment
-     * on the warm one goes with it. Without this the mode would work perfectly in the
-     * preview and do nothing at all in the output -- the worst shape a bug can take.
+     * ⚠ The box is not redundant: three copies of one face share the SAME embedding, so
+     * restoring by identity alone after a pipeline rebuild would collapse them into one
+     * person again. The box is what the user actually pointed at.
      */
     private var swapPersonIdentity by mutableStateOf<Map<Int, FloatArray>>(emptyMap())
     private var liveLargestOnly by mutableStateOf(false)
@@ -842,7 +843,9 @@ class MainActivity : ComponentActivity() {
                     NativePipe.argbToBgr(px, soft.width, soft.height), soft.width, soft.height,
                     cx, cy, if (keepOriginal) 0 else source, keepOriginal)
             }
-            if (identity.size != 512) {
+            // 512 embedding floats + 4 box floats; the box keeps identical-looking
+            // faces distinct across a pipeline rebuild.
+            if (identity.size != 516) {
                 status = getString(R.string.swap_assign_failed, person + 1)
                 return@launch
             }
@@ -914,9 +917,15 @@ class MainActivity : ComponentActivity() {
         if (!swapAssignMode) return 0
         var n = 0
         for ((person, slot) in swapPersonAssignments) {
-            val identity = swapPersonIdentity[person] ?: continue
+            val full = swapPersonIdentity[person] ?: continue
+            // 512 embedding floats + 4 box floats (see assignSwapPerson). The box is
+            // what re-applies the choice to the right face when several look identical.
+            if (full.size < 516) continue
+            val embedding = full.copyOfRange(0, 512)
+            val box = full.copyOfRange(512, 516)
             val keep = slot == KEEP_ORIGINAL
-            if (NativePipe.restoreFaceAssignment(identity, if (keep) 0 else slot, keep)) n++
+            if (NativePipe.restoreFaceAssignmentAt(
+                    embedding, if (keep) 0 else slot, keep, box)) n++
             else appendLog("could not restore the choice for person ${person + 1}")
         }
         return n

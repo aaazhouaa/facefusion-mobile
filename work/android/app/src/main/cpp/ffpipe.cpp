@@ -10,6 +10,16 @@
 
 #include "ffnn.h"
 
+#if defined(__ANDROID__)
+#include <android/log.h>
+// Identity/selector diagnostics. Enabled only while a reference face is set or assign
+// mode is on, so a plain swap is untouched. Read with `adb logcat -s ffpipe`.
+#define FFIDENTLOG(...) __android_log_print(ANDROID_LOG_INFO, "ffpipe", __VA_ARGS__)
+#else
+#define FFIDENTLOG(...) do { fprintf(stderr, "[ident] "); fprintf(stderr, __VA_ARGS__); \
+                            fprintf(stderr, "\n"); } while (0)
+#endif
+
 // FFDEBUG=1 prints what each stage actually produced.  Cheap, and the alternative is
 // guessing at a tensor layout from the host side.
 #include <cstdio>
@@ -168,6 +178,15 @@ struct Pipeline::Impl {
     std::array<float, 512> embedding;
     int source = kNoSource;
     bool keepOriginal = false;
+    // The box the user tapped, in the frame's own pixel coordinates. Needed because
+    // IDENTITY is not enough to tell people apart: three copies of the same face side
+    // by side (a poster, a reflection) produce the SAME embedding, and a
+    // "which face did I point at" match by embedding alone collapses them into one
+    // person. The box is the answer the finger actually gave -- a PLACE, not a
+    // signature -- so it takes priority when it is live, exactly like the reference
+    // selector's geometry-first tracking.
+    float box[4]{};
+    bool hasBox = false;
   };
   std::vector<FaceAssignment> faceAssignments;
   // One person currently in the live frame, matched frame to frame by box overlap
@@ -212,9 +231,17 @@ struct Pipeline::Impl {
   //
   // ⚠ Members, not file-static helpers, because Pipeline::Impl is a private name and
   // nothing outside the class may spell it.
-  void rememberAssignment(const float* embeddingNorm, int sourceIndex, bool keepOriginal);
+  void rememberAssignment(const float* embeddingNorm, int sourceIndex, bool keepOriginal,
+                          const float* box = nullptr);
   void applyToSelected(int sourceIndex, bool keepOriginal);
-  int sourceForFace(const Face& f, size_t fi, size_t faceCount, float refDistance) const;
+  // frameW/frameH are the CURRENT frame's size: the stored box is normalised (0..1),
+  // so a face box in any resolution is compared against it in that same space.
+  //
+  // ⚠ NOT const: on a successful box match it REFRESHES the stored box to the current
+  // face's box. A stored box that never moves is the "assigned face stops matching once
+  // the person moves" bug -- the same tracking the reference selector does with refBox.
+  int sourceForFace(const Face& f, size_t fi, size_t faceCount, float refDistance,
+                    int frameW, int frameH);
   // The source every UNPINNED face keeps while assign mode is on. Captured when the
   // mode is turned on, so flipping the chip afterwards changes nothing on the feed --
   // in assign mode the chip is a BRUSH: only tapping a face applies it. Without the
@@ -229,6 +256,15 @@ struct Pipeline::Impl {
   // what upstream's distance is defined over. Not in Config -- see setReferenceFaceAt.
   float refEmbeddingNorm[512]{};
   bool haveReference = false;
+  // The reference face TRACKED BY BOX once picked. Set the first time swapAll resolves
+  // it; refreshed every frame it is found again. This is what stops the reference
+  // "rotating around everyone's faces": a still clip is a sequence too, and matching
+  // identity per frame with no memory is exactly what made the nearest face jump from
+  // one person to the next on every frame.
+  float refBox[4]{};
+  float refEmbeddingTrack[512]{};
+  int refMissed = 0;
+  bool refTracking = false;
 
   /**
    * A content check has RUN on this pipeline and passed -- roadmap 1a.
@@ -968,6 +1004,15 @@ std::vector<Face> Pipeline::analyse(const ffcv::Image& frame, bool boxesOnly,
     for (int i = 0; i < 512; ++i) nrm += (double)f.embedding[i] * f.embedding[i];
     nrm = std::sqrt(nrm);
     for (int i = 0; i < 512; ++i) f.embeddingNorm[i] = (float)(f.embedding[i] / nrm);
+#if defined(__ANDROID__)
+    FFIDENTLOG("arc: box=[%.0f,%.0f,%.0f,%.0f] lm5=[%.1f,%.1f %.1f,%.1f %.1f,%.1f "
+               "%.1f,%.1f %.1f,%.1f] nrm=%.3f emb0=[%.4f,%.4f,%.4f,%.4f]",
+               f.box[0], f.box[1], f.box[2], f.box[3],
+               f.landmark5_68[0], f.landmark5_68[1], f.landmark5_68[2], f.landmark5_68[3],
+               f.landmark5_68[4], f.landmark5_68[5], f.landmark5_68[6], f.landmark5_68[7],
+               f.landmark5_68[8], f.landmark5_68[9], nrm,
+               f.embeddingNorm[0], f.embeddingNorm[1], f.embeddingNorm[2], f.embeddingNorm[3]);
+#endif
 
     faces.push_back(f);
     ++facesDone;
@@ -1114,6 +1159,9 @@ void Pipeline::clearSourceSlots() {
 // Forward: defined below with the other distance helpers; the assignment helpers need it
 // to decide whether two embeddings are the same person.
 static float faceDistance(const float* a, const float* b);
+// Forward too: boxIoU is defined further down (beside updateLiveTracking), but the
+// assignment helpers above it now match by box first.
+static float boxIoU(const float* a, const float* b);
 
 /**
  * Two embeddings this close are the same person.
@@ -1125,6 +1173,18 @@ static float faceDistance(const float* a, const float* b);
 static constexpr float kSamePerson = 0.15f;
 
 /**
+ * The distance under which a live face is accepted as an already-assigned person.
+ *
+ * Wider than kSamePerson on purpose: kSamePerson is the DEDUPE threshold (two stored
+ * identities this close are collapsed into one, so it must stay conservative), while
+ * this is the MATCH threshold a face is judged against every frame. The same person
+ * turning their head drifts above 0.15; two genuinely different people sit well above
+ * 0.25. Nearest-wins keeps the two apart even inside the window, so a modest widening
+ * only stops "the assigned face drops back to the default source when they turn away".
+ */
+static constexpr float kIdentityMatch = 0.25f;
+
+/**
  * Record one decision about one person, replacing any earlier decision about them.
  *
  * ONE entry per person, newest wins. Two entries for the same face is what made a later
@@ -1133,18 +1193,51 @@ static constexpr float kSamePerson = 0.15f;
  * repeated taps on one person simply piled up.
  */
 void Pipeline::Impl::rememberAssignment(const float* embeddingNorm, int sourceIndex,
-                                       bool keepOriginal) {
+                                       bool keepOriginal, const float* box) {
+  // Replacing an earlier decision about a person is by BOX when a box is available, and
+  // by embedding only as a fallback. Three copies of one face share an embedding, so
+  // merging on embedding alone would collapse three distinct taps into one -- the exact
+  // "assign one face, every face takes it" failure. The box is what the user actually
+  // pointed at, so two taps are the same person only when their boxes are close.
+  //
+  // ⚠ `box`, when given, is NORMALISED (0..1 of the frame it was picked from), so the
+  // same face stays the same box whatever resolution the next frame arrives at.
   faceAssignments.erase(
       std::remove_if(faceAssignments.begin(), faceAssignments.end(),
           [&](const FaceAssignment& a) {
-            return faceDistance(embeddingNorm, a.embedding.data()) < kSamePerson;
+            bool same = false;
+            if (box && a.hasBox) {
+              const float iou = boxIoU(box, a.box);
+              same = iou > 0.5f;
+#if defined(__ANDROID__)
+              if (same)
+                FFIDENTLOG("dedupe: new assignment replaces existing by box (iou=%.3f)", iou);
+#endif
+            } else {
+              const float d = faceDistance(embeddingNorm, a.embedding.data());
+              same = d < kSamePerson;
+#if defined(__ANDROID__)
+              if (same)
+                FFIDENTLOG("dedupe: new assignment merges with existing by identity (d=%.4f < %.4f)",
+                           d, kSamePerson);
+#endif
+            }
+            return same;
           }),
       faceAssignments.end());
   FaceAssignment a{};
   std::memcpy(a.embedding.data(), embeddingNorm, sizeof(float) * 512);
   a.source = keepOriginal ? kNoSource : sourceIndex;
   a.keepOriginal = keepOriginal;
+  if (box) {
+    std::memcpy(a.box, box, sizeof(a.box));
+    a.hasBox = true;
+  }
   faceAssignments.push_back(a);
+#if defined(__ANDROID__)
+  FFIDENTLOG("assignment stored: source=%d keep=%d box=%s total=%zu",
+             sourceIndex, (int)keepOriginal, a.hasBox ? "yes" : "no", faceAssignments.size());
+#endif
 }
 
 /**
@@ -1161,27 +1254,72 @@ void Pipeline::Impl::rememberAssignment(const float* embeddingNorm, int sourceIn
  *   LIVE  the tracker built a per-face table for exactly this frame. Sticky: decided once
  *         at the tap, never re-scored against per-frame embedding noise.
  *   SWAP  there is no tracker, because a preview frame and an output frame are not a
- *         sequence. The decision is by IDENTITY -- the nearest remembered person, within
- *         the same distance the reference selector already uses for "is this them".
+ *         sequence. The decision is by IDENTITY -- the nearest remembered person, at
+ *         kIdentityMatch. That is wider than the DEDUPE threshold kSamePerson (which
+ *         must stay conservative so two stored entries are never collapsed) but still
+ *         narrow enough that two different people do not collide; using the reference
+ *         selector's looser `referenceDistance` here is what made an assignment meant
+ *         for one person apply to every face in a group shot.
  *
  * Unassigned faces take the FROZEN default slot in both, so the source row behaves as a
  * brush on both screens: changing it changes nothing until a person is tapped.
  */
 int Pipeline::Impl::sourceForFace(const Face& f, size_t fi, size_t faceCount,
-                                  float refDistance) const {
+                                  float refDistance, int frameW, int frameH) {
   if (!assignEnabled) return activeSource;
   if (frameSourcesValid && frameSources.size() == faceCount) return frameSources[fi];
-  const FaceAssignment* best = nullptr;
-  float bestD = refDistance;
-  for (const auto& a : faceAssignments) {
-    // A slot the user has since deleted. keepOriginal entries index nothing and so
-    // survive it -- the person was excluded, which is still true with fewer sources.
+  // ⚠ Geometry FIRST, identity second -- the same rule the reference selector follows,
+  // and for the same reason. A clip with several copies of one face (a poster, a
+  // reflection) gives every copy the SAME embedding, so an identity-only match collapses
+  // them into one person and "assign one, every face takes it" is the result. The user
+  // tapped a PLACE: the assignment whose box overlaps the current face most is the one
+  // they meant. Embedding is only the fallback for entries that carry no box (a restored
+  // identity) or when geometry finds nothing.
+  //
+  // ⚠ Stored boxes are NORMALISED (0..1), so the current pixel box must be normalised by
+  // the CURRENT frame's size before comparing. The old code compared 960-preview pixels
+  // against output-frame pixels -- every IoU was 0 past the first frame, so every later
+  // frame fell back to identity and (with identical faces) to the default source.
+  (void)refDistance;
+  float fbox[4];
+  const float iw = frameW > 0 ? (float)frameW : 1.f;
+  const float ih = frameH > 0 ? (float)frameH : 1.f;
+  fbox[0] = f.box[0] / iw; fbox[1] = f.box[1] / ih;
+  fbox[2] = f.box[2] / iw; fbox[3] = f.box[3] / ih;
+
+  FaceAssignment* best = nullptr;
+  float bestIoU = 0.1f;
+  for (auto& a : faceAssignments) {
     if (!a.keepOriginal &&
         (a.source < 0 || a.source >= (int)sourceSlots.size())) continue;
-    const float d = faceDistance(f.embeddingNorm, a.embedding.data());
-    if (d < bestD) { bestD = d; best = &a; }
+    if (a.hasBox) {
+      const float iou = boxIoU(fbox, a.box);
+      if (iou > bestIoU) { bestIoU = iou; best = &a; }
+    }
   }
+  if (!best) {
+    float bestD = kIdentityMatch;
+    for (auto& a : faceAssignments) {
+      if (!a.keepOriginal &&
+          (a.source < 0 || a.source >= (int)sourceSlots.size())) continue;
+      if (a.hasBox) continue;   // already handled above; a boxed entry does not re-match by id
+      const float d = faceDistance(f.embeddingNorm, a.embedding.data());
+      if (d < bestD) { bestD = d; best = &a; }
+    }
+  }
+#if defined(__ANDROID__)
+  FFIDENTLOG("assign face %zu: assignments=%zu best=%s",
+             fi, faceAssignments.size(),
+             best ? (best->keepOriginal ? "keep" : std::to_string(best->source).c_str())
+                  : "none");
+#endif
   if (!best) return assignDefaultSource;
+  // ⚠ REFRESH the stored box to THIS frame's box. Without this the assignment is pinned
+  // to the box the user tapped -- a face that then moves out of it stops matching, and
+  // the identity fallback (identical faces) or the neighbour's box takes over: the
+  // "assigned face flips between sources" jump. Moving the box WITH the face is the
+  // whole of tracking, and it is what the reference selector already does.
+  if (best->hasBox) std::memcpy(best->box, fbox, sizeof(best->box));
   return best->keepOriginal ? kNoSource : best->source;
 }
 
@@ -1193,7 +1331,7 @@ void Pipeline::Impl::applyToSelected(int sourceIndex, bool keepOriginal) {
     t.source = keepOriginal ? kNoSource : sourceIndex;
     t.pinned = true;
     t.missed = 0;
-    rememberAssignment(t.embeddingNorm, t.source, keepOriginal);
+    rememberAssignment(t.embeddingNorm, t.source, keepOriginal, t.box);
     return;
   }
 }
@@ -1226,17 +1364,29 @@ bool Pipeline::setFaceSourceAt(const ffcv::Image& frame, float x, float y, int s
   // noTrack, like every source-image analysis: this records an identity, and an identity
   // computed from a reconstructed box is an identity from a different image.
   auto faces = analyse(frame, /*boxesOnly=*/false, /*noTrack=*/true);
+#if defined(__ANDROID__)
+  for (size_t i = 0; i < faces.size(); ++i)
+    FFIDENTLOG("setFaceSourceAt detected face %zu: box=[%.0f,%.0f,%.0f,%.0f]",
+               i, faces[i].box[0], faces[i].box[1], faces[i].box[2], faces[i].box[3]);
+#endif
   const Face* chosen = nullptr; float bestArea = -1.f;
   for (const auto& f : faces) if (x >= f.box[0] && x <= f.box[2] && y >= f.box[1] && y <= f.box[3]) {
     float a = (f.box[2] - f.box[0]) * (f.box[3] - f.box[1]);
     if (a > bestArea) { bestArea = a; chosen = &f; }
   }
   if (!chosen) { err_ = "no face at selected point"; return false; }
-  if (outBox) std::memcpy(outBox, chosen->box, sizeof(float) * 4);
   // The caller keeps this to restore the choice onto the NEXT pipeline: a run inits a
   // fresh one, and an assignment that lived only in here would not survive pressing Swap.
   if (outEmbedding) std::memcpy(outEmbedding, chosen->embeddingNorm, sizeof(float) * 512);
-  p_->rememberAssignment(chosen->embeddingNorm, sourceIndex, keepOriginal);
+  // Store the box NORMALISED (0..1): the tap happens on a 960-preview frame, the swap on
+  // the full-resolution frame, and a pixel box is meaningless across that gap.
+  float nbox[4];
+  const float iw = frame.w > 0 ? (float)frame.w : 1.f;
+  const float ih = frame.h > 0 ? (float)frame.h : 1.f;
+  nbox[0] = chosen->box[0] / iw; nbox[1] = chosen->box[1] / ih;
+  nbox[2] = chosen->box[2] / iw; nbox[3] = chosen->box[3] / ih;
+  if (outBox) std::memcpy(outBox, nbox, sizeof(float) * 4);
+  p_->rememberAssignment(chosen->embeddingNorm, sourceIndex, keepOriginal, nbox);
   return true;
 }
 
@@ -1249,6 +1399,18 @@ bool Pipeline::restoreFaceAssignment(const float* embedding, int sourceIndex,
     err_ = "source index out of range"; return false;
   }
   p_->rememberAssignment(embedding, sourceIndex, keepOriginal);
+  return true;
+}
+
+bool Pipeline::restoreFaceAssignmentAt(const float* embedding, int sourceIndex,
+                                       bool keepOriginal, const float* box) {
+  err_.clear();
+  if (!p_ || !embedding || !box) { err_ = "no pipeline"; return false; }
+  if (keepOriginal) sourceIndex = kNoSource;
+  else if (sourceIndex < 0 || sourceIndex >= (int)p_->sourceSlots.size()) {
+    err_ = "source index out of range"; return false;
+  }
+  p_->rememberAssignment(embedding, sourceIndex, keepOriginal, box);
   return true;
 }
 
@@ -1304,7 +1466,7 @@ bool Pipeline::addFaceAssignment(const Face& f, int sourceIndex) {
   }
   // Through the shared helper, so a live tap and a Swap-screen tap agree on what
   // replacing a person's earlier choice means. This used to append blindly.
-  p_->rememberAssignment(f.embeddingNorm, sourceIndex, /*keepOriginal=*/false);
+  p_->rememberAssignment(f.embeddingNorm, sourceIndex, /*keepOriginal=*/false, f.box);
   return true;
 }
 
@@ -1552,7 +1714,7 @@ bool Pipeline::updateLiveTracking(const std::vector<Face>& faces,
     // ONE per person, newest wins -- see rememberAssignment, which is also what the Swap
     // screen's by-identity assignment goes through, so both modes agree on what replacing
     // a person's choice means.
-    p_->rememberAssignment(t.embeddingNorm, t.source, tapKeepOriginal);
+    p_->rememberAssignment(t.embeddingNorm, t.source, tapKeepOriginal, t.box);
     if (outTapBox) std::memcpy(outTapBox, t.box, sizeof(float) * 4);
   }
 
@@ -1619,6 +1781,10 @@ bool Pipeline::setReferenceFaceAt(const ffcv::Image& frame, float x, float y, fl
   }
   if (!hit) { err_ = "no face at that point"; return false; }
   std::memcpy(p_->refEmbeddingNorm, hit->embeddingNorm, sizeof(p_->refEmbeddingNorm));
+  std::memcpy(p_->refBox, hit->box, sizeof(p_->refBox));
+  std::memcpy(p_->refEmbeddingTrack, hit->embeddingNorm, sizeof(p_->refEmbeddingTrack));
+  p_->refMissed = 0;
+  p_->refTracking = false;   // the box becomes live on the first swapped frame
   p_->haveReference = true;
   if (outBox) for (int i = 0; i < 4; ++i) outBox[i] = hit->box[i];
   return true;
@@ -1627,6 +1793,9 @@ bool Pipeline::setReferenceFaceAt(const ffcv::Image& frame, float x, float y, fl
 void Pipeline::setReferenceEmbedding(const float* e) {
   if (!p_ || !e) return;
   std::memcpy(p_->refEmbeddingNorm, e, sizeof(p_->refEmbeddingNorm));
+  std::memcpy(p_->refEmbeddingTrack, e, sizeof(p_->refEmbeddingTrack));
+  p_->refMissed = 0;
+  p_->refTracking = false;   // restored without a box; it is re-resolved on the next frame
   p_->haveReference = true;
 }
 
@@ -1636,7 +1805,12 @@ bool Pipeline::referenceEmbedding(float* out) const {
   return true;
 }
 
-void Pipeline::clearReferenceFace() { if (p_) p_->haveReference = false; }
+void Pipeline::clearReferenceFace() {
+  if (!p_) return;
+  p_->haveReference = false;
+  p_->refTracking = false;
+  p_->refMissed = 0;
+}
 
 bool Pipeline::hasReferenceFace() const { return p_ && p_->haveReference; }
 
@@ -1793,11 +1967,11 @@ bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
   msGeom += nowMs() - tm;
   msGeomMask += nowMs() - tm;
 
-  // face_selector_mode `reference`: every face within referenceDistance of the one the
-  // user pointed at. Checked FIRST because the two modes are exclusive upstream -- a
-  // reference that is set is the whole selector, and `one` is what the app falls back to
-  // when there is none. Doing it the other way round would let "largest" quietly override
-  // a face the user chose by hand, which is the one selection they made deliberately.
+  // face_selector_mode `reference`: the face(s) near the one the user pointed at. Checked
+  // FIRST because the two modes are exclusive upstream -- a reference that is set is the
+  // whole selector, and `one` is what the app falls back to when there is none. Doing it
+  // the other way round would let "largest" quietly override a face the user chose by
+  // hand, which is the one selection they made deliberately.
   const bool byReference = p_->haveReference;
 
   // face_selector_mode `one`: the largest detected face by box area.
@@ -1810,15 +1984,74 @@ bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
     }
   }
 
+  // The single face the user chose, re-found on THIS frame.
+  //
+  // ⚠ GEOMETRY FIRST, identity second. A clip is a sequence: once the picked face has
+  // a box, the same box on the next frame is the same person -- no per-frame identity
+  // re-scoring, which is what made the reference rotate from one face to the next on
+  // every frame (each frame's "nearest embedding" can be a different person).
+  //
+  // The embedding is used only to ACQUIRE the box on the first frame, and to RE-ACQUIRE
+  // it after the person is lost and returns. When several people overlap a chosen box
+  // (one walking behind another), the face with the highest box overlap wins, not the
+  // nearest embedding -- the finger picked a place, not a signature.
+  const Face* refOnly = nullptr;
+  if (byReference) {
+    if (p_->refTracking) {
+      // The chosen person, tracked by box: the face that overlaps the remembered box
+      // most. A face the user excluded this way stays excluded no matter how its
+      // embedding reads on a given frame.
+      float bestIoU = 0.10f;
+      for (const Face& f : faces) {
+        const float iou = boxIoU(f.box, p_->refBox);
+        if (iou > bestIoU) { bestIoU = iou; refOnly = &f; }
+      }
+      if (refOnly) {
+        std::memcpy(p_->refBox, refOnly->box, sizeof(p_->refBox));
+        std::memcpy(p_->refEmbeddingTrack, refOnly->embeddingNorm,
+                    sizeof(p_->refEmbeddingTrack));
+        p_->refMissed = 0;
+#if defined(__ANDROID__)
+        FFIDENTLOG("ref track hit: box=[%.0f,%.0f,%.0f,%.0f] iou=%.3f",
+                   refOnly->box[0], refOnly->box[1], refOnly->box[2], refOnly->box[3],
+                   bestIoU);
+#endif
+      } else {
+        // Person lost for this frame. Re-resolve by identity if they came back, but only
+        // after the box has been gone a moment -- a one-frame miss is normal motion.
+        if (++p_->refMissed > 3) p_->refTracking = false;
+      }
+    }
+    if (!p_->refTracking) {
+      // Acquire or re-acquire by identity: the nearest face to the stored reference,
+      // within the user's referenceDistance. This runs only when there is no live box
+      // (first frame, or the person returned after a gap).
+      float bestD = cfg.referenceDistance;
+      for (const Face& f : faces) {
+        const float d = faceDistance(f.embeddingNorm, p_->refEmbeddingNorm);
+        if (d < bestD) { bestD = d; refOnly = &f; }
+      }
+      if (refOnly) {
+        std::memcpy(p_->refBox, refOnly->box, sizeof(p_->refBox));
+        std::memcpy(p_->refEmbeddingTrack, refOnly->embeddingNorm,
+                    sizeof(p_->refEmbeddingTrack));
+        p_->refMissed = 0;
+        p_->refTracking = true;
+#if defined(__ANDROID__)
+        FFIDENTLOG("ref acquire: box=[%.0f,%.0f,%.0f,%.0f] dist=%.4f",
+                   refOnly->box[0], refOnly->box[1], refOnly->box[2], refOnly->box[3],
+                   bestD);
+#endif
+      } else {
+        return true;   // nobody near the reference: leave the frame untouched
+      }
+    }
+  }
+
   for (size_t fi = 0; fi < faces.size(); ++fi) {
     const Face& f = faces[fi];
     if (only && &f != only) continue;
-    // face_selector.py:find_match_faces -- ALL faces near the reference, not the nearest
-    // one. Upstream returns a list, and a clip where the same person is detected twice
-    // (a reflection, a poster) should swap both rather than pick between them.
-    if (byReference &&
-        faceDistance(f.embeddingNorm, p_->refEmbeddingNorm) >= cfg.referenceDistance)
-      continue;
+    if (refOnly && &f != refOnly) continue;
 
     double t0 = nowMs();
     ffcv::Affine am = ffcv::umeyama(f.landmark5_68, tmpl, 5);
@@ -1834,7 +2067,8 @@ bool Pipeline::swapAll(ffcv::Image& frame, const std::vector<Face>& faces) {
     // it.
     // PER-PERSON ASSIGNMENT, on either screen. With the mode off this returns the
     // active slot and the rest of this loop is byte-for-byte what it always was.
-    const int six = p_->sourceForFace(f, fi, faces.size(), cfg.referenceDistance);
+    const int six = p_->sourceForFace(f, fi, faces.size(), cfg.referenceDistance,
+                                      frame.w, frame.h);
     // ⚠ The ONE assignment that is an instruction NOT to swap. It has to be honoured
     // here, before any pixel is read, rather than by pointing the face at some harmless
     // slot: "keep this person's own face" is not a swap with a different source.
@@ -1950,7 +2184,8 @@ bool Pipeline::enhance(ffcv::Image& frame, const std::vector<Face>& faces) {
     // A person the swapper left alone must be left alone here too -- gpen would otherwise
     // redraw the face this mode exists to preserve, and the result would be neither the
     // original nor a swap.
-    if (p_->sourceForFace(f, fi, faces.size(), cfg.referenceDistance) == kNoSource)
+    if (p_->sourceForFace(f, fi, faces.size(), cfg.referenceDistance,
+                          frame.w, frame.h) == kNoSource)
       continue;
 
     double t0 = nowMs();

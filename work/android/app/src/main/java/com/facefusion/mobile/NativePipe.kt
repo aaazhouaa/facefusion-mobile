@@ -302,11 +302,14 @@ object NativePipe {
      * nothing, which leaves that person exactly as they were filmed.
      *
      * The SWAP screen's assignment. It has no tracker to lean on (a preview frame and an
-     * output frame are not a sequence), so what comes back is the person's IDENTITY:
-     * 512 floats, or an EMPTY array when the tap hit no face or the pipeline is cold.
+     * output frame are not a sequence), so what comes back is the person's IDENTITY plus
+     * the box it was picked from: 512 embedding floats followed by 4 box floats, or an
+     * EMPTY array when the tap hit no face or the pipeline is cold.
      *
      * ⚠ Keep what it returns. Pressing Swap builds a fresh pipeline and every assignment
-     * on the old one goes with it; [restoreFaceAssignment] is how they come back.
+     * on the old one goes with it; [restoreFaceAssignmentAt] is how they come back, box
+     * included -- three copies of one face share an embedding, so the box is what makes
+     * a restored assignment land on the right copy.
      */
     @JvmStatic external fun assignFaceAt(bgr: ByteArray, w: Int, h: Int,
                                          x: Float, y: Float, source: Int,
@@ -315,6 +318,11 @@ object NativePipe {
     /** Put one identity from [assignFaceAt] back onto a pipeline that was just built. */
     @JvmStatic external fun restoreFaceAssignment(embedding: FloatArray, source: Int,
                                                   keepOriginal: Boolean): Boolean
+
+    /** Put one identity AND its box back, so identical-looking faces stay distinct. */
+    @JvmStatic external fun restoreFaceAssignmentAt(embedding: FloatArray, source: Int,
+                                                    keepOriginal: Boolean,
+                                                    box: FloatArray): Boolean
 
     /**
      * Queue a tap (DISPLAY bitmap coordinates -- the frame [LiveScreen] draws) for the

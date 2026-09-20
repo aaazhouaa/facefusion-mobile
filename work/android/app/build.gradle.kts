@@ -123,17 +123,17 @@ if (prebuiltNativeDir != null) {
 
 android {
     namespace = "com.facefusion.mobile"
-    // ⚠ compileSdk tracks targetSdk (35), which is what the manifest and the behaviour
-    // changes are written against.  The build sandbox ships platform 35, so the 35 APIs
+    // ⚠ compileSdk tracks targetSdk (36), which is what the manifest and the behaviour
+    // changes are written against.  The build sandbox ships platform 36, so the 36 APIs
     // the app targets are on the classpath.
-    compileSdk = 35
-    buildToolsVersion = "35.0.0"
+    compileSdk = 36
+    buildToolsVersion = "36.0.0"
 
     defaultConfig {
         applicationId = "com.facefusion.mobile$idSuffix"
         buildConfigField("boolean", "DEV_BUILD", (!hasContentGate).toString())
         minSdk = 31                 // SM8750 / HTP v79 is far above this
-        targetSdk = 35
+        targetSdk = 36
         // âš  0.1.1 IS SIGNED WITH A DIFFERENT KEY THAN 0.1.0.  The 0.1.0 keystore was lost,
         // and Android identifies an app by its signature, so this is a DIFFERENT app to
         // every device that already has 0.1.0: it cannot be installed as an update, and
